@@ -20,6 +20,7 @@ RUN apt-get update && \
     xz-utils \
     bzip2 \
     file \
+    sed \
     && rm -rf /var/lib/apt/lists/*
 
 # Install A30 buildroot toolchain
@@ -33,18 +34,17 @@ ENV PATH=/opt/a30/bin:${PATH}
 
 # Create toolchain wrapper scripts (buildroot wrappers weren't included in tarball)
 # The .br_real binaries need --sysroot passed explicitly
-# rm -f first: tarball may contain symlinks that would redirect the write
 RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
     chmod +x /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++
 
-# Create cross pkg-config wrapper (configure looks for ${CROSS_COMPILE}pkg-config)
+# Create cross pkg-config wrapper
 RUN printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDIR=%s/usr/lib/pkgconfig:%s/usr/share/pkgconfig\nexec pkg-config "$@"\n' \
     "$SYSROOT" "$SYSROOT" "$SYSROOT" > /opt/a30/bin/${TARGET}-pkg-config && \
     chmod +x /opt/a30/bin/${TARGET}-pkg-config
 
-# Restore sysroot/lib symlinks stripped by tarball (needed by glibc linker scripts)
+# Restore sysroot/lib symlinks stripped by tarball
 RUN cd "$SYSROOT/lib" && \
     ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
     ln -sf libc-2.23.so libc.so.6 && \
@@ -56,6 +56,7 @@ RUN cd "$SYSROOT/lib" && \
     ln -sf libnsl-2.23.so libnsl.so.1
 
 # Cross-compile libmad (AGS hard dependency)
+# libmad 0.15.1b uses obsolete GCC flags like -fforce-mem/-fforce-addr; strip them after configure
 RUN export CC="${TARGET}-gcc" && \
     export CXX="${TARGET}-g++" && \
     export AR="${TARGET}-ar" && \
@@ -64,7 +65,7 @@ RUN export CC="${TARGET}-gcc" && \
     export RANLIB="${TARGET}-ranlib" && \
     export STRIP="${TARGET}-strip" && \
     export PKG_CONFIG="${TARGET}-pkg-config" && \
-    export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2" && \
+    export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2 -fPIC" && \
     export CXXFLAGS="$CFLAGS" && \
     export LDFLAGS="--sysroot=$SYSROOT" && \
     export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
@@ -75,9 +76,15 @@ RUN export CC="${TARGET}-gcc" && \
     cd libmad-0.15.1b && \
     ./configure \
         --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
         --prefix=$SYSROOT/usr \
         --disable-static \
         --enable-shared && \
+    find . -name Makefile -type f -exec sed -i \
+        -e 's/-fforce-mem//g' \
+        -e 's/-fforce-addr//g' \
+        -e 's/-fstrength-reduce//g' \
+        {} + && \
     make -j$(nproc) && \
     make install && \
     cd "$SYSROOT/usr/lib" && \
@@ -104,6 +111,7 @@ RUN export CC="${TARGET}-gcc" && \
     cd libtheora-1.1.1 && \
     ./configure \
         --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
         --prefix=$SYSROOT/usr \
         --disable-static \
         --enable-shared \
@@ -134,6 +142,7 @@ RUN export CC="${TARGET}-gcc" && \
     cd SDL2_net-2.2.0 && \
     ./configure \
         --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
         --prefix=$SYSROOT/usr \
         --disable-static \
         --enable-shared \
