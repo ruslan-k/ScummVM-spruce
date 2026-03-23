@@ -59,7 +59,7 @@ RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
     tar xjf libtheora-1.1.1.tar.bz2 && \
     cd libtheora-1.1.1 && \
     ./configure --host=arm-a30-linux-gnueabihf --prefix=$SYSROOT/usr \
-        --disable-static --enable-shared \
+        --disable-static --enable-shared ----enable-all-engines \
         --disable-examples --disable-spec --disable-encode && \
     make -j$(nproc) && make install && \
     rm -rf /tmp/libtheora-1.1.1*
