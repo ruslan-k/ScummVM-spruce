@@ -12,6 +12,14 @@ RUN apt-get update && \
     python3 \
     wget \
     ccache \
+    autoconf \
+    automake \
+    libtool \
+    make \
+    perl \
+    xz-utils \
+    bzip2 \
+    file \
     && rm -rf /var/lib/apt/lists/*
 
 # Install A30 buildroot toolchain
@@ -19,24 +27,25 @@ RUN apt-get update && \
 COPY a30_toolchain-v1.0.tar.gz /tmp/
 RUN tar xzf /tmp/a30_toolchain-v1.0.tar.gz -C /opt && rm /tmp/a30_toolchain-v1.0.tar.gz
 
+ENV TARGET=arm-a30-linux-gnueabihf
+ENV SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot
+ENV PATH=/opt/a30/bin:${PATH}
+
 # Create toolchain wrapper scripts (buildroot wrappers weren't included in tarball)
 # The .br_real binaries need --sysroot passed explicitly
 # rm -f first: tarball may contain symlinks that would redirect the write
-RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
-    rm -f /opt/a30/bin/arm-a30-linux-gnueabihf-gcc /opt/a30/bin/arm-a30-linux-gnueabihf-g++ && \
-    printf '#!/bin/sh\nexec /opt/a30/bin/arm-a30-linux-gnueabihf-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$SYSROOT" > /opt/a30/bin/arm-a30-linux-gnueabihf-gcc && \
-    printf '#!/bin/sh\nexec /opt/a30/bin/arm-a30-linux-gnueabihf-c++.br_real --sysroot=%s "$@"\n' "$SYSROOT" > /opt/a30/bin/arm-a30-linux-gnueabihf-g++ && \
-    chmod +x /opt/a30/bin/arm-a30-linux-gnueabihf-gcc /opt/a30/bin/arm-a30-linux-gnueabihf-g++
+RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
+    chmod +x /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++
 
 # Create cross pkg-config wrapper (configure looks for ${CROSS_COMPILE}pkg-config)
-RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
-    printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDIR=%s/usr/lib/pkgconfig\nexec pkg-config "$@"\n' \
-    "$SYSROOT" "$SYSROOT" > /opt/a30/bin/arm-a30-linux-gnueabihf-pkg-config && \
-    chmod +x /opt/a30/bin/arm-a30-linux-gnueabihf-pkg-config
+RUN printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDIR=%s/usr/lib/pkgconfig:%s/usr/share/pkgconfig\nexec pkg-config "$@"\n' \
+    "$SYSROOT" "$SYSROOT" "$SYSROOT" > /opt/a30/bin/${TARGET}-pkg-config && \
+    chmod +x /opt/a30/bin/${TARGET}-pkg-config
 
 # Restore sysroot/lib symlinks stripped by tarball (needed by glibc linker scripts)
-RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
-    cd "$SYSROOT/lib" && \
+RUN cd "$SYSROOT/lib" && \
     ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
     ln -sf libc-2.23.so libc.so.6 && \
     ln -sf libpthread-2.23.so libpthread.so.0 && \
@@ -46,45 +55,95 @@ RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
     ln -sf libresolv-2.23.so libresolv.so.2 && \
     ln -sf libnsl-2.23.so libnsl.so.1
 
-# Cross-compile libtheora (not in toolchain sysroot, not on device)
-RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
-    export PATH="/opt/a30/bin:$PATH" && \
-    export CC="arm-a30-linux-gnueabihf-gcc" && \
-    export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard" && \
+# Cross-compile libmad (AGS hard dependency)
+RUN export CC="${TARGET}-gcc" && \
+    export CXX="${TARGET}-g++" && \
+    export AR="${TARGET}-ar" && \
+    export AS="${TARGET}-as" && \
+    export LD="${TARGET}-ld" && \
+    export RANLIB="${TARGET}-ranlib" && \
+    export STRIP="${TARGET}-strip" && \
+    export PKG_CONFIG="${TARGET}-pkg-config" && \
+    export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2" && \
+    export CXXFLAGS="$CFLAGS" && \
     export LDFLAGS="--sysroot=$SYSROOT" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
+    cd /tmp && \
+    wget -q https://downloads.sourceforge.net/mad/libmad-0.15.1b.tar.gz && \
+    tar xzf libmad-0.15.1b.tar.gz && \
+    cd libmad-0.15.1b && \
+    ./configure \
+        --host=${TARGET} \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared && \
+    make -j$(nproc) && \
+    make install && \
+    cd "$SYSROOT/usr/lib" && \
+    [ -e libmad.so ] || ln -sf "$(basename "$(ls libmad.so.* | head -n1)")" libmad.so && \
+    rm -rf /tmp/libmad-0.15.1b*
+
+# Cross-compile libtheora (not in toolchain sysroot, not on device)
+RUN export CC="${TARGET}-gcc" && \
+    export CXX="${TARGET}-g++" && \
+    export AR="${TARGET}-ar" && \
+    export AS="${TARGET}-as" && \
+    export LD="${TARGET}-ld" && \
+    export RANLIB="${TARGET}-ranlib" && \
+    export STRIP="${TARGET}-strip" && \
+    export PKG_CONFIG="${TARGET}-pkg-config" && \
+    export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2" && \
+    export CXXFLAGS="$CFLAGS" && \
+    export LDFLAGS="--sysroot=$SYSROOT" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
     export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
     cd /tmp && \
     wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
     tar xjf libtheora-1.1.1.tar.bz2 && \
     cd libtheora-1.1.1 && \
-    ./configure --host=arm-a30-linux-gnueabihf --prefix=$SYSROOT/usr \
-        --disable-static --enable-shared --enable-all-engines \
-        --disable-examples --disable-spec --disable-encode && \
-    make -j$(nproc) && make install && \
+    ./configure \
+        --host=${TARGET} \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared \
+        --disable-examples \
+        --disable-spec \
+        --disable-encode && \
+    make -j$(nproc) && \
+    make install && \
     rm -rf /tmp/libtheora-1.1.1*
 
 # Cross-compile SDL2_net (not on device)
-RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
-    export PATH="/opt/a30/bin:$PATH" && \
-    export CC="arm-a30-linux-gnueabihf-gcc" && \
-    export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard" && \
+RUN export CC="${TARGET}-gcc" && \
+    export CXX="${TARGET}-g++" && \
+    export AR="${TARGET}-ar" && \
+    export AS="${TARGET}-as" && \
+    export LD="${TARGET}-ld" && \
+    export RANLIB="${TARGET}-ranlib" && \
+    export STRIP="${TARGET}-strip" && \
+    export PKG_CONFIG="${TARGET}-pkg-config" && \
+    export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2" && \
+    export CXXFLAGS="$CFLAGS" && \
     export LDFLAGS="--sysroot=$SYSROOT" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
     export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
     cd /tmp && \
     wget -q https://www.libsdl.org/projects/SDL_net/release/SDL2_net-2.2.0.tar.gz && \
     tar xzf SDL2_net-2.2.0.tar.gz && \
     cd SDL2_net-2.2.0 && \
-    ./configure --host=arm-a30-linux-gnueabihf --prefix=$SYSROOT/usr \
-        --disable-static --enable-shared \
+    ./configure \
+        --host=${TARGET} \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared \
         --with-sdl-prefix=$SYSROOT/usr && \
-    make -j$(nproc) && make install && \
+    make -j$(nproc) && \
+    make install && \
     rm -rf /tmp/SDL2_net-2.2.0*
 
 # Create library symlinks that ScummVM's configure expects
-RUN SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot && \
-    cd "$SYSROOT/usr/lib" && \
+RUN cd "$SYSROOT/usr/lib" && \
     ln -sf libSDL2-2.0.so.0.2800.5 libSDL2.so && \
     ln -sf libMali.so libEGL.so && \
     ln -sf libMali.so libGLESv2.so && \
