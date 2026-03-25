@@ -278,12 +278,17 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch (CMake) ----
+# ---- libinstpatch (FINAL FIX) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
     cd libinstpatch-1.1.6 && \
+    \
     export PKG_CONFIG=${TARGET}-pkg-config && \
+    export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
+    \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
         -DCMAKE_C_COMPILER=${TARGET}-gcc \
@@ -296,7 +301,16 @@ RUN cd /tmp && \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
-        -DBUILD_TESTING=OFF && \
+        -DBUILD_TESTING=OFF \
+        -DINSTALL_DOC=OFF \
+        -DENABLE_GTK_DOC=OFF \
+        -DENABLE_INTROSPECTION=OFF \
+        -DENABLE_EXAMPLES=OFF \
+        -DENABLE_TOOLS=OFF \
+        -DLIBINSTPATCH_BUILD_TESTS=OFF \
+        -DLIBINSTPATCH_BUILD_EXAMPLES=OFF \
+        -DLIBINSTPATCH_BUILD_TOOLS=OFF && \
+    \
     cmake --build build -j$(nproc) && \
     cmake --install build && \
     rm -rf /tmp/libinstpatch-1.1.6*
