@@ -278,7 +278,7 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch (FINAL FIX NO COMMENTS) ----
+# ---- libinstpatch (ABSOLUTE FINAL FIX) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
@@ -289,13 +289,15 @@ RUN cd /tmp && \
     export PKG_CONFIG_LIBDIR=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig && \
     export PKG_CONFIG_SYSROOT_DIR=$SYSROOT && \
     \
+    GLIB_INC="$SYSROOT/usr/include/glib-2.0;$SYSROOT/usr/lib/glib-2.0/include" && \
+    \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
         -DCMAKE_C_COMPILER=${TARGET}-gcc \
         -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
         -DCMAKE_SYSROOT=$SYSROOT \
         -DCMAKE_PREFIX_PATH=$SYSROOT/usr \
-        -DGLIB2_INCLUDE_DIRS=$SYSROOT/usr/include/glib-2.0\;$SYSROOT/usr/lib/glib-2.0/include \
+        -DGLIB2_INCLUDE_DIRS="$GLIB_INC" \
         -DGLIB2_LIBRARIES=$SYSROOT/usr/lib/libglib-2.0.so \
         -DGOBJECT2_LIBRARIES=$SYSROOT/usr/lib/libgobject-2.0.so \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
