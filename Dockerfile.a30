@@ -278,16 +278,11 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch (FINAL REAL FIX) ----
+# ---- libinstpatch (REAL FINAL FIX — pkg-config forced) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
     cd libinstpatch-1.1.6 && \
-    \
-    export PKG_CONFIG=${TARGET}-pkg-config && \
-    export PKG_CONFIG_PATH=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig && \
-    export PKG_CONFIG_LIBDIR=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig && \
-    export PKG_CONFIG_SYSROOT_DIR=$SYSROOT && \
     \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
@@ -295,10 +290,9 @@ RUN cd /tmp && \
         -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
         -DCMAKE_SYSROOT=$SYSROOT \
         -DCMAKE_PREFIX_PATH=$SYSROOT/usr \
-        -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
-        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
-        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+        \
+        -DPKG_CONFIG_EXECUTABLE=${TARGET}-pkg-config \
+        \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
