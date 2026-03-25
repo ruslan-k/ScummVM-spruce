@@ -231,7 +231,7 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/pcre-8.45*
 
-# ---- glib (FIXED) ----
+# ---- glib (FINAL FIX) ----
 RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.66/glib-2.66.8.tar.xz && \
     wget -q https://ftp2.osuosl.org/pub/blfs/conglomeration/glib/glib-2.66.8-skip_warnings-1.patch && \
@@ -246,9 +246,7 @@ RUN cd /tmp && \
         --prefix=$SYSROOT/usr \
         --libdir=lib \
         -Ddefault_library=shared \
-        -Dinstalled_tests=false \
-        -Dglib_debug=disabled \
-        -Dnls=disabled && \
+        -Dinstalled_tests=false && \
     \
     meson compile -C build -j$(nproc) && \
     meson install -C build && \
