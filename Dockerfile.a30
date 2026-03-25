@@ -7,12 +7,36 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ========================
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    bash build-essential pkg-config git ca-certificates \
-    python3 wget curl ccache \
-    autoconf automake libtool make perl \
-    xz-utils bzip2 file sed gawk \
-    meson ninja-build cmake \
-    gettext autopoint texinfo dpkg-dev unzip rsync \
+    bash \
+    build-essential \
+    pkg-config \
+    git \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    wget \
+    curl \
+    ccache \
+    autoconf \
+    automake \
+    libtool \
+    make \
+    perl \
+    xz-utils \
+    bzip2 \
+    file \
+    sed \
+    gawk \
+    meson \
+    ninja-build \
+    cmake \
+    gettext \
+    gettext-base \
+    autopoint \
+    texinfo \
+    dpkg-dev \
+    unzip \
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # ========================
@@ -25,148 +49,331 @@ ENV TARGET=arm-a30-linux-gnueabihf
 ENV SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot
 ENV PATH=/opt/a30/bin:${PATH}
 
-ENV CC=${TARGET}-gcc
-ENV CXX=${TARGET}-g++
-ENV AR=${TARGET}-ar
-ENV RANLIB=${TARGET}-ranlib
-ENV STRIP=${TARGET}-strip
+ENV CC=/opt/a30/bin/arm-a30-linux-gnueabihf-gcc
+ENV CXX=/opt/a30/bin/arm-a30-linux-gnueabihf-g++
+ENV AR=/opt/a30/bin/arm-a30-linux-gnueabihf-ar
+ENV AS=/opt/a30/bin/arm-a30-linux-gnueabihf-as
+ENV LD=/opt/a30/bin/arm-a30-linux-gnueabihf-ld
+ENV RANLIB=/opt/a30/bin/arm-a30-linux-gnueabihf-ranlib
+ENV STRIP=/opt/a30/bin/arm-a30-linux-gnueabihf-strip
 
 # ========================
-# PKG-CONFIG FIX
+# PKG-CONFIG
 # ========================
-ENV PKG_CONFIG=${TARGET}-pkg-config
-ENV PKG_CONFIG_PATH=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig
-ENV PKG_CONFIG_LIBDIR=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig
-ENV PKG_CONFIG_SYSROOT_DIR=$SYSROOT
+ENV PKG_CONFIG=/opt/a30/bin/arm-a30-linux-gnueabihf-pkg-config
+ENV PKG_CONFIG_PATH=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib/pkgconfig:/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/share/pkgconfig
+ENV PKG_CONFIG_LIBDIR=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib/pkgconfig:/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/share/pkgconfig
+ENV PKG_CONFIG_SYSROOT_DIR=/opt/a30/arm-a30-linux-gnueabihf/sysroot
 ENV PKG_CONFIG_DIR=
 
-RUN ln -sf /opt/a30/bin/${TARGET}-pkg-config /usr/bin/pkg-config
+RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
+    chmod +x /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++
+
+RUN printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDIR=%s/usr/lib/pkgconfig:%s/usr/share/pkgconfig\nexec /usr/bin/pkg-config "$@"\n' \
+    "$SYSROOT" "$SYSROOT" "$SYSROOT" > /opt/a30/bin/${TARGET}-pkg-config && \
+    chmod +x /opt/a30/bin/${TARGET}-pkg-config && \
+    ln -sf /opt/a30/bin/${TARGET}-pkg-config /usr/local/bin/${TARGET}-pkg-config
+
+# make plain pkg-config resolve through the cross wrapper too
+RUN printf '#!/bin/sh\nexec /opt/a30/bin/%s-pkg-config "$@"\n' "$TARGET" > /usr/local/bin/pkg-config && \
+    chmod +x /usr/local/bin/pkg-config
 
 # ========================
 # FLAGS
 # ========================
-ENV CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2 -fPIC"
-ENV CXXFLAGS="$CFLAGS"
-ENV LDFLAGS="--sysroot=$SYSROOT"
-ENV LD_LIBRARY_PATH=$SYSROOT/usr/lib
+ENV CFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot\ -march=armv7-a\ -mfpu=neon-vfpv4\ -mfloat-abi=hard\ -O2\ -fPIC
+ENV CXXFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot\ -march=armv7-a\ -mfpu=neon-vfpv4\ -mfloat-abi=hard\ -O2\ -fPIC
+ENV LDFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot
+ENV LD_LIBRARY_PATH=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib
 
 # ========================
-# SYSROOT FIX
+# SYSROOT SONAME LINKS
 # ========================
 RUN cd "$SYSROOT/lib" && \
     ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
-    ln -sf libc-2.23.so libc.so.6
+    ln -sf libc-2.23.so libc.so.6 && \
+    ln -sf libpthread-2.23.so libpthread.so.0 && \
+    ln -sf libdl-2.23.so libdl.so.2 && \
+    ln -sf libm-2.23.so libm.so.6 && \
+    ln -sf librt-2.23.so librt.so.1 && \
+    ln -sf libresolv-2.23.so libresolv.so.2 && \
+    ln -sf libnsl-2.23.so libnsl.so.1
+
+# ========================
+# MESON CROSS FILE
+# ========================
+RUN cat > /opt/a30/meson-cross.txt <<EOF
+[binaries]
+c = '${TARGET}-gcc'
+cpp = '${TARGET}-g++'
+ar = '${TARGET}-ar'
+strip = '${TARGET}-strip'
+pkg-config = '${TARGET}-pkg-config'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'arm'
+cpu = 'armv7'
+endian = 'little'
+
+[properties]
+sys_root = '${SYSROOT}'
+needs_exe_wrapper = true
+
+[built-in options]
+c_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat-abi=hard', '-O2', '-fPIC']
+cpp_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat-abi=hard', '-O2', '-fPIC']
+c_link_args = ['--sysroot=${SYSROOT}']
+cpp_link_args = ['--sysroot=${SYSROOT}']
+EOF
 
 # ========================
 # LIBS
 # ========================
 
 # ---- libogg ----
-RUN cd /tmp && wget -q https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.gz && \
-    tar xzf libogg-1.3.5.tar.gz && cd libogg-1.3.5 && \
-    ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
-    make -j$(nproc) && make install
-
-# ---- libvorbis ----
-RUN cd /tmp && wget -q https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz && \
-    tar xzf libvorbis-1.3.7.tar.gz && cd libvorbis-1.3.7 && \
-    ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
-    make -j$(nproc) && make install
-
-# ---- SDL2 ----
-RUN cd /tmp && wget -q https://www.libsdl.org/release/SDL2-2.28.5.tar.gz && \
-    tar xzf SDL2-2.28.5.tar.gz && cd SDL2-2.28.5 && \
+RUN cd /tmp && \
+    wget -q https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.gz && \
+    tar xzf libogg-1.3.5.tar.gz && \
+    cd libogg-1.3.5 && \
     ./configure \
         --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/libogg-1.3.5*
+
+# ---- libvorbis ----
+RUN cd /tmp && \
+    wget -q https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz && \
+    tar xzf libvorbis-1.3.7.tar.gz && \
+    cd libvorbis-1.3.7 && \
+    ./configure \
+        --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/libvorbis-1.3.7*
+
+# ---- SDL2 ----
+RUN cd /tmp && \
+    wget -q https://www.libsdl.org/release/SDL2-2.28.5.tar.gz && \
+    tar xzf SDL2-2.28.5.tar.gz && \
+    cd SDL2-2.28.5 && \
+    ./configure \
+        --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
         --prefix=$SYSROOT/usr \
         --disable-static \
         --enable-shared \
         --disable-video-opengl \
-        --disable-video-x11 \
-        --disable-video-wayland && \
-    make -j$(nproc) && make install
+        --disable-video-wayland \
+        --disable-video-x11 && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/SDL2-2.28.5*
 
 # ---- libtheora ----
-RUN cd /tmp && wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
-    tar xjf libtheora-1.1.1.tar.bz2 && cd libtheora-1.1.1 && \
+RUN cd /tmp && \
+    wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
+    tar xjf libtheora-1.1.1.tar.bz2 && \
+    cd libtheora-1.1.1 && \
     ./configure \
         --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
         --prefix=$SYSROOT/usr \
         --disable-static \
         --enable-shared \
+        --disable-examples \
+        --disable-spec \
         --disable-encode && \
-    make -j$(nproc) && make install
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/libtheora-1.1.1*
 
 # ---- libffi ----
-RUN cd /tmp && wget -q https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz && \
-    tar xzf libffi-3.4.6.tar.gz && cd libffi-3.4.6 && \
-    ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
-    make -j$(nproc) && make install
-
-# ========================
-# 🔥 GLIB (AUTOTOOLS FIX)
-# ========================
-RUN cd /tmp && wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
-    tar xf glib-2.56.4.tar.xz && cd glib-2.56.4 && \
+RUN cd /tmp && \
+    wget -q https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz && \
+    tar xzf libffi-3.4.6.tar.gz && \
+    cd libffi-3.4.6 && \
     ./configure \
         --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/libffi-3.4.6*
+
+# ---- glib ----
+RUN cd /tmp && \
+    wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
+    tar xf glib-2.56.4.tar.xz && \
+    cd glib-2.56.4 && \
+    export PATH="/usr/local/bin:/opt/a30/bin:$PATH" && \
+    export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
+    export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
+    export LIBFFI_CFLAGS="-I$SYSROOT/usr/include" && \
+    export LIBFFI_LIBS="-L$SYSROOT/usr/lib -lffi" && \
+    ./configure \
+        --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
         --prefix=$SYSROOT/usr \
         --disable-static \
         --enable-shared \
         --disable-libmount \
         --disable-selinux \
-        --disable-xattr && \
+        --disable-xattr \
+        --with-pcre=internal && \
     make -j$(nproc) && \
-    make install
+    make install && \
+    rm -rf /tmp/glib-2.56.4*
 
 # ---- libsndfile ----
-RUN cd /tmp && wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
-    tar xf libsndfile-1.2.2.tar.xz && cd libsndfile-1.2.2 && \
+RUN cd /tmp && \
+    wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
+    tar xf libsndfile-1.2.2.tar.xz && \
+    cd libsndfile-1.2.2 && \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_C_COMPILER=${TARGET}-gcc \
+        -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
         -DCMAKE_SYSROOT=$SYSROOT \
         -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
         -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
+        -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
         -DBUILD_PROGRAMS=OFF \
         -DBUILD_EXAMPLES=OFF \
         -DBUILD_TESTING=OFF \
         -DENABLE_EXTERNAL_LIBS=OFF \
         -DENABLE_MPEG=OFF && \
-    cmake --build build -j$(nproc) && \
-    cmake --install build
+    cmake --build build -j $(nproc) && \
+    cmake --install build && \
+    rm -rf /tmp/libsndfile-1.2.2*
+
+# ---- libinstpatch ----
+RUN cd /tmp && \
+    wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
+    tar xzf libinstpatch-1.1.6.tar.gz && \
+    cd libinstpatch-1.1.6 && \
+    meson setup build \
+        --cross-file /opt/a30/meson-cross.txt \
+        --prefix=$SYSROOT/usr \
+        --libdir=lib \
+        -Ddefault_library=shared \
+        -Dgtk-doc=false \
+        -Dintrospection=disabled \
+        -Dtests=false \
+        -Dexamples=false && \
+    meson compile -C build -j $(nproc) && \
+    meson install -C build && \
+    rm -rf /tmp/libinstpatch-1.1.6*
 
 # ---- fluidsynth ----
-RUN cd /tmp && wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth.tar.gz && \
-    tar xzf fluidsynth.tar.gz && cd fluidsynth-2.3.6 && \
+RUN cd /tmp && \
+    wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth-2.3.6.tar.gz && \
+    tar xzf fluidsynth-2.3.6.tar.gz && \
+    cd fluidsynth-2.3.6 && \
+    export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
+    export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_C_COMPILER=${TARGET}-gcc \
+        -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
         -DCMAKE_SYSROOT=$SYSROOT \
         -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
+        -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
         -Denable-alsa=OFF \
-        -Denable-pulseaudio=OFF \
-        -Denable-network=OFF \
+        -Denable-aufile=OFF \
+        -Denable-dbus=OFF \
+        -Denable-ipv6=OFF \
         -Denable-jack=OFF \
-        -Denable-sdl2=OFF && \
-    cmake --build build -j$(nproc) && \
-    cmake --install build
+        -Denable-ladspa=OFF \
+        -Denable-midishare=OFF \
+        -Denable-network=OFF \
+        -Denable-oss=OFF \
+        -Denable-pipewire=OFF \
+        -Denable-pulseaudio=OFF \
+        -Denable-readline=OFF \
+        -Denable-sdl2=OFF \
+        -Denable-systemd=OFF \
+        -Denable-wasapi=OFF \
+        -Denable-dart=OFF \
+        -Denable-floats=ON && \
+    cmake --build build -j $(nproc) && \
+    cmake --install build && \
+    rm -rf /tmp/fluidsynth-2.3.6*
 
 # ========================
-# RUNTIME
+# COMMON SONAME LINKS
+# ========================
+RUN cd "$SYSROOT/usr/lib" && \
+    [ -e libSDL2.so ] || ln -sf "$(basename "$(ls libSDL2-2.0.so.* | head -n1)")" libSDL2.so && \
+    [ -e libglib-2.0.so ] || ln -sf "$(basename "$(ls libglib-2.0.so.* | head -n1)")" libglib-2.0.so && \
+    [ -e libgthread-2.0.so ] || ln -sf "$(basename "$(ls libgthread-2.0.so.* | head -n1)")" libgthread-2.0.so && \
+    [ -e libgobject-2.0.so ] || ln -sf "$(basename "$(ls libgobject-2.0.so.* | head -n1)")" libgobject-2.0.so && \
+    [ -e libgio-2.0.so ] || ln -sf "$(basename "$(ls libgio-2.0.so.* | head -n1)")" libgio-2.0.so && \
+    [ -e libgmodule-2.0.so ] || ln -sf "$(basename "$(ls libgmodule-2.0.so.* | head -n1)")" libgmodule-2.0.so && \
+    [ -e libffi.so ] || ln -sf "$(basename "$(ls libffi.so.* | head -n1)")" libffi.so && \
+    [ -e libsndfile.so ] || ln -sf "$(basename "$(ls libsndfile.so.* | head -n1)")" libsndfile.so && \
+    [ -e libinstpatch-1.0.so ] || ln -sf "$(basename "$(ls libinstpatch-1.0.so.* | head -n1)")" libinstpatch-1.0.so && \
+    [ -e libfluidsynth.so ] || ln -sf "$(basename "$(ls libfluidsynth.so.* | head -n1)")" libfluidsynth.so && \
+    true
+
+# ========================
+# RUNTIME BUNDLE
 # ========================
 RUN mkdir -p /opt/a30-runtime/lib && \
-    cp -av $SYSROOT/usr/lib/lib*.so* /opt/a30-runtime/lib/ || true
+    cp -av \
+        "$SYSROOT/usr/lib/libogg.so"* \
+        "$SYSROOT/usr/lib/libvorbis.so"* \
+        "$SYSROOT/usr/lib/libvorbisenc.so"* \
+        "$SYSROOT/usr/lib/libvorbisfile.so"* \
+        "$SYSROOT/usr/lib/libtheora.so"* \
+        "$SYSROOT/usr/lib/libtheoradec.so"* \
+        "$SYSROOT/usr/lib/libSDL2.so"* \
+        "$SYSROOT/usr/lib/libffi.so"* \
+        "$SYSROOT/usr/lib/libglib-2.0.so"* \
+        "$SYSROOT/usr/lib/libgthread-2.0.so"* \
+        "$SYSROOT/usr/lib/libgobject-2.0.so"* \
+        "$SYSROOT/usr/lib/libgio-2.0.so"* \
+        "$SYSROOT/usr/lib/libgmodule-2.0.so"* \
+        "$SYSROOT/usr/lib/libsndfile.so"* \
+        "$SYSROOT/usr/lib/libinstpatch-1.0.so"* \
+        "$SYSROOT/usr/lib/libfluidsynth.so"* \
+        /opt/a30-runtime/lib/ && \
+    true
+
+RUN (cd /opt/a30-runtime/lib && ls -1 > /opt/a30-runtime/RUNTIME_LIBS.txt)
 
 # ========================
 # BUILD SCRIPT
 # ========================
 COPY build-a30.sh /build-a30.sh
 RUN chmod +x /build-a30.sh
+COPY patches/ /patches/
 
 WORKDIR /build
 ENTRYPOINT ["/build-a30.sh"]
