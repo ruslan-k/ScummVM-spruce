@@ -289,12 +289,16 @@ RUN cd /tmp && \
     export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
     export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
     \
+    # 🔴 THIS LINE IS CRITICAL
+    export CMAKE_PREFIX_PATH="$SYSROOT/usr" && \
+    \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
         -DCMAKE_C_COMPILER=${TARGET}-gcc \
         -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
         -DCMAKE_SYSROOT=$SYSROOT \
         -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
+        -DCMAKE_PREFIX_PATH="$SYSROOT/usr" \
         -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
