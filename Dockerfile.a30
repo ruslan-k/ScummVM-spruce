@@ -252,7 +252,7 @@ RUN cd /tmp && \
     meson install -C build && \
     rm -rf /tmp/glib-2.66.8* /tmp/glib-2.66.8-skip_warnings-1.patch
 
-# ---- libsndfile (FIXED) ----
+# ---- libsndfile (FINAL FIX) ----
 RUN cd /tmp && \
     wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
     tar xf libsndfile-1.2.2.tar.xz && \
@@ -272,7 +272,8 @@ RUN cd /tmp && \
         -DBUILD_PROGRAMS=OFF \
         -DBUILD_EXAMPLES=OFF \
         -DBUILD_TESTING=OFF \
-        -DENABLE_EXTERNAL_LIBS=ON && \
+        -DENABLE_EXTERNAL_LIBS=OFF \
+        -DENABLE_MPEG=OFF && \
     cmake --build build -j$(nproc) && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
