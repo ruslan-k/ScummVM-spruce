@@ -58,7 +58,7 @@ ENV LD=/opt/a30/bin/arm-a30-linux-gnueabihf-ld
 ENV RANLIB=/opt/a30/bin/arm-a30-linux-gnueabihf-ranlib
 ENV STRIP=/opt/a30/bin/arm-a30-linux-gnueabihf-strip
 
-# Wrap compiler binaries to force sysroot
+# Force sysroot through wrappers
 RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
@@ -230,55 +230,6 @@ RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
     tar xf glib-2.56.4.tar.xz && \
     cd glib-2.56.4 && \
-    python3 - <<'PY'
-from pathlib import Path
-
-auth = Path("gio/gdbusauth.c")
-text = auth.read_text()
-old = """          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
-          if (line == NULL)
-            goto out;
-"""
-new = """          if (line == NULL)
-            goto out;
-          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
-"""
-if old not in text:
-    raise SystemExit("Expected gdbusauth.c hunk not found")
-auth.write_text(text.replace(old, new, 1))
-
-msg = Path("gio/gdbusmessage.c")
-text = msg.read_text()
-old = """      tupled_signature_str = g_strdup_printf ("(%s)", signature_str);
-      if (signature == NULL)
-        {
-          g_set_error (error,
-                       G_IO_ERROR,
-                       G_IO_ERROR_INVALID_ARGUMENT,
-                       _("Message body has signature “%s” but there is no signature header"),
-                       signature_str);
-          g_free (tupled_signature_str);
-          goto out;
-        }
-      else if (g_strcmp0 (tupled_signature_str, g_variant_get_type_string (message->body)) != 0)
-"""
-new = """      if (signature == NULL)
-        {
-          g_set_error (error,
-                       G_IO_ERROR,
-                       G_IO_ERROR_INVALID_ARGUMENT,
-                       _("Message body has signature “%s” but there is no signature header"),
-                       signature_str);
-          goto out;
-        }
-      tupled_signature_str = g_strdup_printf ("(%s)", signature_str);
-      if (g_strcmp0 (tupled_signature_str, g_variant_get_type_string (message->body)) != 0)
-"""
-if old not in text:
-    raise SystemExit("Expected gdbusmessage.c hunk not found")
-msg.write_text(text.replace(old, new, 1))
-PY
-RUN cd /tmp/glib-2.56.4 && \
     export PATH="/usr/local/bin:/opt/a30/bin:$PATH" && \
     export CONFIG_SITE="/opt/a30/glib-cross.site" && \
     export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
@@ -327,22 +278,32 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch ----
+# ---- libinstpatch (use CMake, not Meson) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
     cd libinstpatch-1.1.6 && \
-    meson setup build \
-        --cross-file /opt/a30/meson-cross.txt \
-        --prefix=$SYSROOT/usr \
-        --libdir=lib \
-        -Ddefault_library=shared \
-        -Dgtk-doc=false \
-        -Dintrospection=disabled \
-        -Dtests=false \
-        -Dexamples=false && \
-    meson compile -C build -j $(nproc) && \
-    meson install -C build && \
+    export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
+    export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
+    cmake -S . -B build \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_C_COMPILER=${TARGET}-gcc \
+        -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
+        -DCMAKE_SYSROOT=$SYSROOT \
+        -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+        -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTING=OFF \
+        -DINSTALL_DOC=OFF \
+        -DENABLE_GTK_DOC=OFF && \
+    cmake --build build -j $(nproc) && \
+    cmake --install build && \
     rm -rf /tmp/libinstpatch-1.1.6*
 
 # ---- fluidsynth ----
