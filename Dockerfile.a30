@@ -278,7 +278,7 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch (REAL FINAL FIX) ----
+# ---- libinstpatch (FINAL FIX NO COMMENTS) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
@@ -295,12 +295,9 @@ RUN cd /tmp && \
         -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
         -DCMAKE_SYSROOT=$SYSROOT \
         -DCMAKE_PREFIX_PATH=$SYSROOT/usr \
-        \
-        # 🔴 THIS IS THE FIX
-        -DGLIB2_INCLUDE_DIRS="$SYSROOT/usr/include/glib-2.0;$SYSROOT/usr/lib/glib-2.0/include" \
-        -DGLIB2_LIBRARIES="$SYSROOT/usr/lib/libglib-2.0.so" \
-        -DGOBJECT2_LIBRARIES="$SYSROOT/usr/lib/libgobject-2.0.so" \
-        \
+        -DGLIB2_INCLUDE_DIRS=$SYSROOT/usr/include/glib-2.0\;$SYSROOT/usr/lib/glib-2.0/include \
+        -DGLIB2_LIBRARIES=$SYSROOT/usr/lib/libglib-2.0.so \
+        -DGOBJECT2_LIBRARIES=$SYSROOT/usr/lib/libgobject-2.0.so \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
