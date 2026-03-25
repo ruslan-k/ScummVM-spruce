@@ -231,21 +231,25 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/pcre-8.45*
 
-# ---- glib (2.66.8 + BLFS warning patch) ----
+# ---- glib (FIXED) ----
 RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.66/glib-2.66.8.tar.xz && \
     wget -q https://ftp2.osuosl.org/pub/blfs/conglomeration/glib/glib-2.66.8-skip_warnings-1.patch && \
     tar xf glib-2.66.8.tar.xz && \
     cd glib-2.66.8 && \
     patch -Np1 -i /tmp/glib-2.66.8-skip_warnings-1.patch && \
+    \
     export PKG_CONFIG=${TARGET}-pkg-config && \
+    \
     meson setup build \
         --cross-file /opt/a30/meson-cross.txt \
         --prefix=$SYSROOT/usr \
         --libdir=lib \
         -Ddefault_library=shared \
-        -Dtests=false \
-        -Dinstalled_tests=false && \
+        -Dinstalled_tests=false \
+        -Dglib_debug=disabled \
+        -Dnls=disabled && \
+    \
     meson compile -C build -j$(nproc) && \
     meson install -C build && \
     rm -rf /tmp/glib-2.66.8* /tmp/glib-2.66.8-skip_warnings-1.patch
