@@ -47,7 +47,7 @@ RUN tar xzf /tmp/a30_toolchain-v1.0.tar.gz -C /opt && rm /tmp/a30_toolchain-v1.0
 
 ENV TARGET=arm-a30-linux-gnueabihf
 ENV SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot
-ENV PATH=/opt/a30/bin:${PATH}
+ENV PATH=/opt/a30/bin:/usr/local/bin:${PATH}
 
 ENV CC=/opt/a30/bin/arm-a30-linux-gnueabihf-gcc
 ENV CXX=/opt/a30/bin/arm-a30-linux-gnueabihf-g++
@@ -76,7 +76,6 @@ RUN printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDI
     chmod +x /opt/a30/bin/${TARGET}-pkg-config && \
     ln -sf /opt/a30/bin/${TARGET}-pkg-config /usr/local/bin/${TARGET}-pkg-config
 
-# make plain pkg-config resolve through the cross wrapper too
 RUN printf '#!/bin/sh\nexec /opt/a30/bin/%s-pkg-config "$@"\n' "$TARGET" > /usr/local/bin/pkg-config && \
     chmod +x /usr/local/bin/pkg-config
 
@@ -127,6 +126,16 @@ c_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat
 cpp_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat-abi=hard', '-O2', '-fPIC']
 c_link_args = ['--sysroot=${SYSROOT}']
 cpp_link_args = ['--sysroot=${SYSROOT}']
+EOF
+
+# ========================
+# GLIB CROSS CACHE
+# ========================
+RUN cat > /opt/a30/glib-cross.site <<'EOF'
+glib_cv_stack_grows=no
+glib_cv_uscore=no
+ac_cv_func_posix_getpwuid_r=yes
+ac_cv_func_posix_getgrgid_r=yes
 EOF
 
 # ========================
@@ -220,6 +229,7 @@ RUN cd /tmp && \
     tar xf glib-2.56.4.tar.xz && \
     cd glib-2.56.4 && \
     export PATH="/usr/local/bin:/opt/a30/bin:$PATH" && \
+    export CONFIG_SITE="/opt/a30/glib-cross.site" && \
     export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
     export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
     export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
