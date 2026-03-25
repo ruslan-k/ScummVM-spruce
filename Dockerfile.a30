@@ -58,6 +58,7 @@ ENV LD=/opt/a30/bin/arm-a30-linux-gnueabihf-ld
 ENV RANLIB=/opt/a30/bin/arm-a30-linux-gnueabihf-ranlib
 ENV STRIP=/opt/a30/bin/arm-a30-linux-gnueabihf-strip
 
+# Force sysroot through wrappers
 RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
@@ -127,16 +128,6 @@ c_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat
 cpp_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat-abi=hard', '-O2', '-fPIC']
 c_link_args = ['--sysroot=${SYSROOT}']
 cpp_link_args = ['--sysroot=${SYSROOT}']
-EOF
-
-# ========================
-# GLIB CROSS CACHE
-# ========================
-RUN cat > /opt/a30/glib-cross.site <<'EOF'
-glib_cv_stack_grows=no
-glib_cv_uscore=no
-ac_cv_func_posix_getpwuid_r=yes
-ac_cv_func_posix_getgrgid_r=yes
 EOF
 
 # ========================
@@ -224,73 +215,40 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/libffi-3.4.6*
 
-# ---- glib ----
+# ---- pcre ----
 RUN cd /tmp && \
-    wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
-    tar xf glib-2.56.4.tar.xz && \
-    cd glib-2.56.4 && \
-    python3 - <<'PY'
-from pathlib import Path
-
-p = Path("gio/gdbusauth.c")
-s = p.read_text()
-
-repls = [
-("""          debug_print ("SERVER: WaitingForAuth, read '%s'", line);
-          if (line == NULL)
-            goto out;
-""",
-"""          if (line == NULL)
-            goto out;
-          debug_print ("SERVER: WaitingForAuth, read '%s'", line);
-"""),
-("""          debug_print ("SERVER: WaitingForData, read '%s'", line);
-          if (line == NULL)
-            goto out;
-""",
-"""          if (line == NULL)
-            goto out;
-          debug_print ("SERVER: WaitingForData, read '%s'", line);
-"""),
-("""          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
-          if (line == NULL)
-            goto out;
-""",
-"""          if (line == NULL)
-            goto out;
-          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
-""")
-]
-
-for old, new in repls:
-    if old not in s:
-        raise SystemExit(f"Expected hunk not found in gdbusauth.c:\\n{old}")
-    s = s.replace(old, new, 1)
-
-p.write_text(s)
-PY
-RUN cd /tmp/glib-2.56.4 && \
-    export PATH="/usr/local/bin:/opt/a30/bin:$PATH" && \
-    export CONFIG_SITE="/opt/a30/glib-cross.site" && \
-    export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
-    export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
-    export LIBFFI_CFLAGS="-I$SYSROOT/usr/include" && \
-    export LIBFFI_LIBS="-L$SYSROOT/usr/lib -lffi" && \
+    wget -q https://sourceforge.net/projects/pcre/files/pcre/8.45/pcre-8.45.tar.gz && \
+    tar xzf pcre-8.45.tar.gz && \
+    cd pcre-8.45 && \
     ./configure \
         --host=${TARGET} \
         --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
         --prefix=$SYSROOT/usr \
         --disable-static \
         --enable-shared \
-        --disable-libmount \
-        --disable-selinux \
-        --disable-xattr \
-        --with-pcre=internal && \
+        --disable-cpp && \
     make -j$(nproc) && \
     make install && \
-    rm -rf /tmp/glib-2.56.4*
+    rm -rf /tmp/pcre-8.45*
+
+# ---- glib (2.66.8 + BLFS warning patch) ----
+RUN cd /tmp && \
+    wget -q https://download.gnome.org/sources/glib/2.66/glib-2.66.8.tar.xz && \
+    wget -q https://ftp2.osuosl.org/pub/blfs/conglomeration/glib/glib-2.66.8-skip_warnings-1.patch && \
+    tar xf glib-2.66.8.tar.xz && \
+    cd glib-2.66.8 && \
+    patch -Np1 -i /tmp/glib-2.66.8-skip_warnings-1.patch && \
+    export PKG_CONFIG=${TARGET}-pkg-config && \
+    meson setup build \
+        --cross-file /opt/a30/meson-cross.txt \
+        --prefix=$SYSROOT/usr \
+        --libdir=lib \
+        -Ddefault_library=shared \
+        -Dtests=false \
+        -Dinstalled_tests=false && \
+    meson compile -C build -j$(nproc) && \
+    meson install -C build && \
+    rm -rf /tmp/glib-2.66.8* /tmp/glib-2.66.8-skip_warnings-1.patch
 
 # ---- libsndfile ----
 RUN cd /tmp && \
@@ -314,19 +272,16 @@ RUN cd /tmp && \
         -DBUILD_TESTING=OFF \
         -DENABLE_EXTERNAL_LIBS=OFF \
         -DENABLE_MPEG=OFF && \
-    cmake --build build -j $(nproc) && \
+    cmake --build build -j$(nproc) && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch (use CMake) ----
+# ---- libinstpatch (CMake) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
     cd libinstpatch-1.1.6 && \
-    export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
-    export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
+    export PKG_CONFIG=${TARGET}-pkg-config && \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
         -DCMAKE_C_COMPILER=${TARGET}-gcc \
@@ -340,7 +295,7 @@ RUN cd /tmp && \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
         -DBUILD_TESTING=OFF && \
-    cmake --build build -j $(nproc) && \
+    cmake --build build -j$(nproc) && \
     cmake --install build && \
     rm -rf /tmp/libinstpatch-1.1.6*
 
@@ -349,9 +304,9 @@ RUN cd /tmp && \
     wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth-2.3.6.tar.gz && \
     tar xzf fluidsynth-2.3.6.tar.gz && \
     cd fluidsynth-2.3.6 && \
-    export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
+    export PKG_CONFIG=${TARGET}-pkg-config && \
     export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr.lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
     export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
@@ -382,7 +337,7 @@ RUN cd /tmp && \
         -Denable-wasapi=OFF \
         -Denable-dart=OFF \
         -Denable-floats=ON && \
-    cmake --build build -j $(nproc) && \
+    cmake --build build -j$(nproc) && \
     cmake --install build && \
     rm -rf /tmp/fluidsynth-2.3.6*
 
