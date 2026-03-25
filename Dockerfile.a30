@@ -277,7 +277,7 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch (FINAL FIX) ----
+# ---- libinstpatch (FINAL CLEAN FIX) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
@@ -285,11 +285,6 @@ RUN cd /tmp && \
     \
     export PKG_CONFIG=${TARGET}-pkg-config && \
     export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
-    \
-    # 🔴 THIS LINE IS CRITICAL
-    export CMAKE_PREFIX_PATH="$SYSROOT/usr" && \
     \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
@@ -298,21 +293,10 @@ RUN cd /tmp && \
         -DCMAKE_SYSROOT=$SYSROOT \
         -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
         -DCMAKE_PREFIX_PATH="$SYSROOT/usr" \
-        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
-        -DBUILD_TESTING=OFF \
-        -DINSTALL_DOC=OFF \
-        -DENABLE_GTK_DOC=OFF \
-        -DENABLE_INTROSPECTION=OFF \
-        -DENABLE_EXAMPLES=OFF \
-        -DENABLE_TOOLS=OFF \
-        -DLIBINSTPATCH_BUILD_TESTS=OFF \
-        -DLIBINSTPATCH_BUILD_EXAMPLES=OFF \
-        -DLIBINSTPATCH_BUILD_TOOLS=OFF && \
+        -DBUILD_TESTING=OFF && \
     \
     cmake --build build -j$(nproc) && \
     cmake --install build && \
