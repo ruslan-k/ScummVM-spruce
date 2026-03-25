@@ -58,7 +58,6 @@ ENV LD=/opt/a30/bin/arm-a30-linux-gnueabihf-ld
 ENV RANLIB=/opt/a30/bin/arm-a30-linux-gnueabihf-ranlib
 ENV STRIP=/opt/a30/bin/arm-a30-linux-gnueabihf-strip
 
-# Force sysroot through wrappers
 RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
@@ -230,6 +229,47 @@ RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
     tar xf glib-2.56.4.tar.xz && \
     cd glib-2.56.4 && \
+    python3 - <<'PY'
+from pathlib import Path
+
+p = Path("gio/gdbusauth.c")
+s = p.read_text()
+
+repls = [
+("""          debug_print ("SERVER: WaitingForAuth, read '%s'", line);
+          if (line == NULL)
+            goto out;
+""",
+"""          if (line == NULL)
+            goto out;
+          debug_print ("SERVER: WaitingForAuth, read '%s'", line);
+"""),
+("""          debug_print ("SERVER: WaitingForData, read '%s'", line);
+          if (line == NULL)
+            goto out;
+""",
+"""          if (line == NULL)
+            goto out;
+          debug_print ("SERVER: WaitingForData, read '%s'", line);
+"""),
+("""          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
+          if (line == NULL)
+            goto out;
+""",
+"""          if (line == NULL)
+            goto out;
+          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
+""")
+]
+
+for old, new in repls:
+    if old not in s:
+        raise SystemExit(f"Expected hunk not found in gdbusauth.c:\\n{old}")
+    s = s.replace(old, new, 1)
+
+p.write_text(s)
+PY
+RUN cd /tmp/glib-2.56.4 && \
     export PATH="/usr/local/bin:/opt/a30/bin:$PATH" && \
     export CONFIG_SITE="/opt/a30/glib-cross.site" && \
     export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
@@ -278,7 +318,7 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- libinstpatch (use CMake, not Meson) ----
+# ---- libinstpatch (use CMake) ----
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
@@ -299,9 +339,7 @@ RUN cd /tmp && \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
-        -DBUILD_TESTING=OFF \
-        -DINSTALL_DOC=OFF \
-        -DENABLE_GTK_DOC=OFF && \
+        -DBUILD_TESTING=OFF && \
     cmake --build build -j $(nproc) && \
     cmake --install build && \
     rm -rf /tmp/libinstpatch-1.1.6*
@@ -313,7 +351,7 @@ RUN cd /tmp && \
     cd fluidsynth-2.3.6 && \
     export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
     export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
+    export PKG_CONFIG_LIBDIR="$SYSROOT/usr.lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
     export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
