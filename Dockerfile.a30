@@ -2,7 +2,6 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Basic build tools + helpers used by configure/meson/cmake builds
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     bash \
@@ -37,8 +36,6 @@ RUN apt-get update && \
     rsync \
     && rm -rf /var/lib/apt/lists/*
 
-# Install A30 buildroot toolchain
-# GCC 13.2.0, glibc 2.23 sysroot, Mali fbdev EGL/GLES2, SDL2 2.28.5
 COPY a30_toolchain-v1.0.tar.gz /tmp/
 RUN tar xzf /tmp/a30_toolchain-v1.0.tar.gz -C /opt && rm /tmp/a30_toolchain-v1.0.tar.gz
 
@@ -46,7 +43,6 @@ ENV TARGET=arm-a30-linux-gnueabihf
 ENV SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot
 ENV PATH=/opt/a30/bin:${PATH}
 
-# Consistent cross-build environment
 ENV CC=/opt/a30/bin/arm-a30-linux-gnueabihf-gcc
 ENV CXX=/opt/a30/bin/arm-a30-linux-gnueabihf-g++
 ENV AR=/opt/a30/bin/arm-a30-linux-gnueabihf-ar
@@ -61,19 +57,15 @@ ENV CFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot\ -march=armv7-a\ -
 ENV CXXFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot\ -march=armv7-a\ -mfpu=neon-vfpv4\ -mfloat-abi=hard\ -O2\ -fPIC
 ENV LDFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot
 
-# Create toolchain wrapper scripts (buildroot wrappers weren't included in tarball)
-# The .br_real binaries need --sysroot passed explicitly
 RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
     chmod +x /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++
 
-# Create cross pkg-config wrapper
 RUN printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDIR=%s/usr/lib/pkgconfig:%s/usr/share/pkgconfig\nexec pkg-config "$@"\n' \
     "$SYSROOT" "$SYSROOT" "$SYSROOT" > /opt/a30/bin/${TARGET}-pkg-config && \
     chmod +x /opt/a30/bin/${TARGET}-pkg-config
 
-# Restore sysroot/lib symlinks stripped by tarball
 RUN cd "$SYSROOT/lib" && \
     ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
     ln -sf libc-2.23.so libc.so.6 && \
@@ -84,7 +76,6 @@ RUN cd "$SYSROOT/lib" && \
     ln -sf libresolv-2.23.so libresolv.so.2 && \
     ln -sf libnsl-2.23.so libnsl.so.1
 
-# Cross-file for meson projects
 RUN cat > /opt/a30/meson-cross.txt <<EOF
 [binaries]
 c = '${TARGET}-gcc'
@@ -101,18 +92,15 @@ endian = 'little'
 
 [properties]
 sys_root = '${SYSROOT}'
+needs_exe_wrapper = true
+
+[built-in options]
 c_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat-abi=hard', '-O2', '-fPIC']
 cpp_args = ['--sysroot=${SYSROOT}', '-march=armv7-a', '-mfpu=neon-vfpv4', '-mfloat-abi=hard', '-O2', '-fPIC']
 c_link_args = ['--sysroot=${SYSROOT}']
 cpp_link_args = ['--sysroot=${SYSROOT}']
-needs_exe_wrapper = true
 EOF
 
-# -----------------------------
-# Core extra libraries
-# -----------------------------
-
-# Cross-compile libmad (AGS hard dependency)
 RUN cd /tmp && \
     wget -q https://downloads.sourceforge.net/mad/libmad-0.15.1b.tar.gz && \
     tar xzf libmad-0.15.1b.tar.gz && \
@@ -134,7 +122,6 @@ RUN cd /tmp && \
     [ -e libmad.so ] || ln -sf "$(basename "$(ls libmad.so.* | head -n1)")" libmad.so && \
     rm -rf /tmp/libmad-0.15.1b*
 
-# Cross-compile libtheora (not in toolchain sysroot, not on device)
 RUN cd /tmp && \
     wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
     tar xjf libtheora-1.1.1.tar.bz2 && \
@@ -152,7 +139,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/libtheora-1.1.1*
 
-# Cross-compile SDL2_net (not on device)
 RUN cd /tmp && \
     wget -q https://www.libsdl.org/projects/SDL_net/release/SDL2_net-2.2.0.tar.gz && \
     tar xzf SDL2_net-2.2.0.tar.gz && \
@@ -168,13 +154,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/SDL2_net-2.2.0*
 
-# -----------------------------
-# Optional FluidSynth stack
-# -----------------------------
-# This is here because your current build does not provide FluidSynth at all.
-# If you don't want it, remove this whole section.
-
-# libffi
 RUN cd /tmp && \
     wget -q https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz && \
     tar xzf libffi-3.4.6.tar.gz && \
@@ -189,7 +168,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/libffi-3.4.6*
 
-# glib
 RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.80/glib-2.80.5.tar.xz && \
     tar xf glib-2.80.5.tar.xz && \
@@ -198,6 +176,7 @@ RUN cd /tmp && \
         --cross-file /opt/a30/meson-cross.txt \
         --prefix=$SYSROOT/usr \
         --libdir=lib \
+        --buildtype=release \
         -Ddefault_library=shared \
         -Dtests=false \
         -Dnls=disabled \
@@ -205,13 +184,11 @@ RUN cd /tmp && \
         -Dselinux=disabled \
         -Dxattr=false \
         -Dlibmount=disabled \
-        -Dinternal_pcre=true && \
+        -Dforce_posix_threads=true && \
     meson compile -C build -j $(nproc) && \
     meson install -C build && \
     rm -rf /tmp/glib-2.80.5*
 
-# libsndfile
-# Keep this minimal to satisfy FluidSynth; no external ogg/flac/opust support.
 RUN cd /tmp && \
     wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
     tar xf libsndfile-1.2.2.tar.xz && \
@@ -233,7 +210,6 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# libinstpatch
 RUN cd /tmp && \
     wget -q https://github.com/swami/libinstpatch/releases/download/v1.1.6/libinstpatch-1.1.6.tar.gz && \
     tar xzf libinstpatch-1.1.6.tar.gz && \
@@ -251,7 +227,6 @@ RUN cd /tmp && \
     meson install -C build && \
     rm -rf /tmp/libinstpatch-1.1.6*
 
-# FluidSynth
 RUN cd /tmp && \
     wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth-2.3.6.tar.gz && \
     tar xzf fluidsynth-2.3.6.tar.gz && \
@@ -285,9 +260,6 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/fluidsynth-2.3.6*
 
-# -----------------------------
-# Symlinks that ScummVM configure commonly expects
-# -----------------------------
 RUN cd "$SYSROOT/usr/lib" && \
     [ -e libSDL2.so ] || ln -sf libSDL2-2.0.so.0.2800.5 libSDL2.so && \
     [ -e libEGL.so ] || ln -sf libMali.so libEGL.so && \
@@ -296,10 +268,6 @@ RUN cd "$SYSROOT/usr/lib" && \
     [ -e libfreetype.so ] || ln -sf libfreetype.so.6.20.1 libfreetype.so && \
     true
 
-# -----------------------------
-# Build a runtime bundle for packaging
-# -----------------------------
-# This helps avoid "built against one view, ran against another" on A30.
 RUN mkdir -p /opt/a30-runtime/lib && \
     cp -av \
         "$SYSROOT/usr/lib/libmad.so"* \
@@ -318,7 +286,6 @@ RUN mkdir -p /opt/a30-runtime/lib && \
     if ls "$SYSROOT/usr/lib/libinstpatch-1.0.so"* >/dev/null 2>&1; then cp -av "$SYSROOT/usr/lib/libinstpatch-1.0.so"* /opt/a30-runtime/lib/; fi && \
     true
 
-# Convenience manifest
 RUN (cd /opt/a30-runtime/lib && ls -1 > /opt/a30-runtime/RUNTIME_LIBS.txt)
 
 COPY build-a30.sh /build-a30.sh
