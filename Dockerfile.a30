@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     bash build-essential pkg-config git ca-certificates \
-    python3 python3-pip wget curl ccache \
+    python3 wget curl ccache \
     autoconf automake libtool make perl xz-utils bzip2 \
     file sed gawk meson ninja-build cmake gettext \
     gettext-base autopoint texinfo dpkg-dev unzip rsync \
@@ -27,13 +27,11 @@ ENV PATH=/opt/a30/bin:${PATH}
 ENV CC=${TARGET}-gcc
 ENV CXX=${TARGET}-g++
 ENV AR=${TARGET}-ar
-ENV AS=${TARGET}-as
-ENV LD=${TARGET}-ld
 ENV RANLIB=${TARGET}-ranlib
 ENV STRIP=${TARGET}-strip
 
 # ========================
-# PKG-CONFIG FIX
+# PKG-CONFIG (CRITICAL FIX)
 # ========================
 ENV PKG_CONFIG=${TARGET}-pkg-config
 ENV PKG_CONFIG_PATH=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig
@@ -52,14 +50,14 @@ ENV LDFLAGS="--sysroot=$SYSROOT"
 ENV LD_LIBRARY_PATH=$SYSROOT/usr/lib
 
 # ========================
-# SYSROOT FIXES
+# SYSROOT FIX
 # ========================
 RUN cd "$SYSROOT/lib" && \
     ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
     ln -sf libc-2.23.so libc.so.6
 
 # ========================
-# MESON CROSS
+# MESON CROSS FILE
 # ========================
 RUN cat > /opt/a30/meson-cross.txt <<EOF
 [binaries]
@@ -81,7 +79,7 @@ needs_exe_wrapper = true
 EOF
 
 # ========================
-# LIBS
+# REQUIRED LIBS
 # ========================
 
 # ---- libogg ----
@@ -102,33 +100,6 @@ RUN cd /tmp && wget -q https://www.libsdl.org/release/SDL2-2.28.5.tar.gz && \
     ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
     make -j$(nproc) && make install
 
-# ========================
-# 🔥 libmad FIXED
-# ========================
-RUN cd /tmp && \
-    wget -q https://downloads.sourceforge.net/mad/libmad-0.15.1b.tar.gz && \
-    tar xzf libmad-0.15.1b.tar.gz && \
-    cd libmad-0.15.1b && \
-    CFLAGS="$CFLAGS -DOPT_SPEED=0" \
-    ./configure \
-        --host=${TARGET} \
-        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
-        --prefix=$SYSROOT/usr \
-        --disable-static \
-        --enable-shared && \
-    \
-    find . -name Makefile -type f -exec sed -i \
-        -e 's/-fforce-mem//g' \
-        -e 's/-fforce-addr//g' \
-        -e 's/-fstrength-reduce//g' \
-        {} + && \
-    \
-    make -j$(nproc) && \
-    make install && \
-    cd "$SYSROOT/usr/lib" && \
-    [ -e libmad.so ] || ln -sf "$(basename "$(ls libmad.so.* | head -n1)")" libmad.so && \
-    rm -rf /tmp/libmad-0.15.1b*
-
 # ---- libtheora ----
 RUN cd /tmp && wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
     tar xjf libtheora-1.1.1.tar.bz2 && cd libtheora-1.1.1 && \
@@ -141,7 +112,7 @@ RUN cd /tmp && wget -q https://github.com/libffi/libffi/releases/download/v3.4.6
     ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
     make -j$(nproc) && make install
 
-# ---- glib (safe version) ----
+# ---- glib (SAFE VERSION) ----
 RUN cd /tmp && wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
     tar xf glib-2.56.4.tar.xz && cd glib-2.56.4 && \
     meson setup build --cross-file /opt/a30/meson-cross.txt \
@@ -152,7 +123,7 @@ RUN cd /tmp && wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.
     meson install -C build
 
 # ========================
-# RUNTIME
+# RUNTIME BUNDLE
 # ========================
 RUN mkdir -p /opt/a30-runtime/lib && \
     cp -av $SYSROOT/usr/lib/lib*.so* /opt/a30-runtime/lib/ || true
