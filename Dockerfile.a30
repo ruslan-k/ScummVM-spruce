@@ -37,6 +37,7 @@ RUN apt-get update && \
     dpkg-dev \
     unzip \
     rsync \
+    patch \
     && rm -rf /var/lib/apt/lists/*
 
 # ========================
@@ -57,6 +58,12 @@ ENV LD=/opt/a30/bin/arm-a30-linux-gnueabihf-ld
 ENV RANLIB=/opt/a30/bin/arm-a30-linux-gnueabihf-ranlib
 ENV STRIP=/opt/a30/bin/arm-a30-linux-gnueabihf-strip
 
+# Wrap compiler binaries to force sysroot
+RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
+    printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
+    chmod +x /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++
+
 # ========================
 # PKG-CONFIG
 # ========================
@@ -65,11 +72,6 @@ ENV PKG_CONFIG_PATH=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib/pkgconfig:/
 ENV PKG_CONFIG_LIBDIR=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib/pkgconfig:/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/share/pkgconfig
 ENV PKG_CONFIG_SYSROOT_DIR=/opt/a30/arm-a30-linux-gnueabihf/sysroot
 ENV PKG_CONFIG_DIR=
-
-RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
-    printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
-    printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
-    chmod +x /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++
 
 RUN printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDIR=%s/usr/lib/pkgconfig:%s/usr/share/pkgconfig\nexec /usr/bin/pkg-config "$@"\n' \
     "$SYSROOT" "$SYSROOT" "$SYSROOT" > /opt/a30/bin/${TARGET}-pkg-config && \
@@ -228,6 +230,55 @@ RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
     tar xf glib-2.56.4.tar.xz && \
     cd glib-2.56.4 && \
+    python3 - <<'PY'
+from pathlib import Path
+
+auth = Path("gio/gdbusauth.c")
+text = auth.read_text()
+old = """          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
+          if (line == NULL)
+            goto out;
+"""
+new = """          if (line == NULL)
+            goto out;
+          debug_print ("SERVER: WaitingForBegin, read '%s'", line);
+"""
+if old not in text:
+    raise SystemExit("Expected gdbusauth.c hunk not found")
+auth.write_text(text.replace(old, new, 1))
+
+msg = Path("gio/gdbusmessage.c")
+text = msg.read_text()
+old = """      tupled_signature_str = g_strdup_printf ("(%s)", signature_str);
+      if (signature == NULL)
+        {
+          g_set_error (error,
+                       G_IO_ERROR,
+                       G_IO_ERROR_INVALID_ARGUMENT,
+                       _("Message body has signature “%s” but there is no signature header"),
+                       signature_str);
+          g_free (tupled_signature_str);
+          goto out;
+        }
+      else if (g_strcmp0 (tupled_signature_str, g_variant_get_type_string (message->body)) != 0)
+"""
+new = """      if (signature == NULL)
+        {
+          g_set_error (error,
+                       G_IO_ERROR,
+                       G_IO_ERROR_INVALID_ARGUMENT,
+                       _("Message body has signature “%s” but there is no signature header"),
+                       signature_str);
+          goto out;
+        }
+      tupled_signature_str = g_strdup_printf ("(%s)", signature_str);
+      if (g_strcmp0 (tupled_signature_str, g_variant_get_type_string (message->body)) != 0)
+"""
+if old not in text:
+    raise SystemExit("Expected gdbusmessage.c hunk not found")
+msg.write_text(text.replace(old, new, 1))
+PY
+RUN cd /tmp/glib-2.56.4 && \
     export PATH="/usr/local/bin:/opt/a30/bin:$PATH" && \
     export CONFIG_SITE="/opt/a30/glib-cross.site" && \
     export PKG_CONFIG="/opt/a30/bin/${TARGET}-pkg-config" && \
