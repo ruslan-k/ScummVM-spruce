@@ -9,9 +9,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     bash build-essential pkg-config git ca-certificates \
     python3 wget curl ccache \
-    autoconf automake libtool make perl xz-utils bzip2 \
-    file sed gawk meson ninja-build cmake gettext \
-    gettext-base autopoint texinfo dpkg-dev unzip rsync \
+    autoconf automake libtool make perl \
+    xz-utils bzip2 file sed gawk \
+    meson ninja-build cmake \
+    gettext autopoint texinfo dpkg-dev unzip rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # ========================
@@ -31,7 +32,7 @@ ENV RANLIB=${TARGET}-ranlib
 ENV STRIP=${TARGET}-strip
 
 # ========================
-# PKG-CONFIG (CRITICAL FIX)
+# PKG-CONFIG FIX
 # ========================
 ENV PKG_CONFIG=${TARGET}-pkg-config
 ENV PKG_CONFIG_PATH=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig
@@ -57,29 +58,7 @@ RUN cd "$SYSROOT/lib" && \
     ln -sf libc-2.23.so libc.so.6
 
 # ========================
-# MESON CROSS FILE
-# ========================
-RUN cat > /opt/a30/meson-cross.txt <<EOF
-[binaries]
-c = '${TARGET}-gcc'
-cpp = '${TARGET}-g++'
-ar = '${TARGET}-ar'
-strip = '${TARGET}-strip'
-pkg-config = '${TARGET}-pkg-config'
-
-[host_machine]
-system = 'linux'
-cpu_family = 'arm'
-cpu = 'armv7'
-endian = 'little'
-
-[properties]
-sys_root = '${SYSROOT}'
-needs_exe_wrapper = true
-EOF
-
-# ========================
-# REQUIRED LIBS
+# LIBS
 # ========================
 
 # ---- libogg ----
@@ -97,13 +76,25 @@ RUN cd /tmp && wget -q https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.
 # ---- SDL2 ----
 RUN cd /tmp && wget -q https://www.libsdl.org/release/SDL2-2.28.5.tar.gz && \
     tar xzf SDL2-2.28.5.tar.gz && cd SDL2-2.28.5 && \
-    ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
+    ./configure \
+        --host=${TARGET} \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared \
+        --disable-video-opengl \
+        --disable-video-x11 \
+        --disable-video-wayland && \
     make -j$(nproc) && make install
 
 # ---- libtheora ----
 RUN cd /tmp && wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
     tar xjf libtheora-1.1.1.tar.bz2 && cd libtheora-1.1.1 && \
-    ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
+    ./configure \
+        --host=${TARGET} \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared \
+        --disable-encode && \
     make -j$(nproc) && make install
 
 # ---- libffi ----
@@ -112,18 +103,61 @@ RUN cd /tmp && wget -q https://github.com/libffi/libffi/releases/download/v3.4.6
     ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
     make -j$(nproc) && make install
 
-# ---- glib (SAFE VERSION) ----
+# ========================
+# 🔥 GLIB (AUTOTOOLS FIX)
+# ========================
 RUN cd /tmp && wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
     tar xf glib-2.56.4.tar.xz && cd glib-2.56.4 && \
-    meson setup build --cross-file /opt/a30/meson-cross.txt \
+    ./configure \
+        --host=${TARGET} \
         --prefix=$SYSROOT/usr \
-        -Ddefault_library=shared \
-        -Dtests=false && \
-    meson compile -C build && \
-    meson install -C build
+        --disable-static \
+        --enable-shared \
+        --disable-libmount \
+        --disable-selinux \
+        --disable-xattr && \
+    make -j$(nproc) && \
+    make install
+
+# ---- libsndfile ----
+RUN cd /tmp && wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
+    tar xf libsndfile-1.2.2.tar.xz && cd libsndfile-1.2.2 && \
+    cmake -S . -B build \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSROOT=$SYSROOT \
+        -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+        -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_PROGRAMS=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_TESTING=OFF \
+        -DENABLE_EXTERNAL_LIBS=OFF \
+        -DENABLE_MPEG=OFF && \
+    cmake --build build -j$(nproc) && \
+    cmake --install build
+
+# ---- fluidsynth ----
+RUN cd /tmp && wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth.tar.gz && \
+    tar xzf fluidsynth.tar.gz && cd fluidsynth-2.3.6 && \
+    cmake -S . -B build \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSROOT=$SYSROOT \
+        -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
+        -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
+        -DBUILD_SHARED_LIBS=ON \
+        -Denable-alsa=OFF \
+        -Denable-pulseaudio=OFF \
+        -Denable-network=OFF \
+        -Denable-jack=OFF \
+        -Denable-sdl2=OFF && \
+    cmake --build build -j$(nproc) && \
+    cmake --install build
 
 # ========================
-# RUNTIME BUNDLE
+# RUNTIME
 # ========================
 RUN mkdir -p /opt/a30-runtime/lib && \
     cp -av $SYSROOT/usr/lib/lib*.so* /opt/a30-runtime/lib/ || true
