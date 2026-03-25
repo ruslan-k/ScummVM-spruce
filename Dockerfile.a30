@@ -2,7 +2,9 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ---- base deps ----
+# ========================
+# BASE
+# ========================
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     bash build-essential pkg-config git ca-certificates \
@@ -12,7 +14,9 @@ RUN apt-get update && \
     gettext-base autopoint texinfo dpkg-dev unzip rsync \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- toolchain ----
+# ========================
+# TOOLCHAIN
+# ========================
 COPY a30_toolchain-v1.0.tar.gz /tmp/
 RUN tar xzf /tmp/a30_toolchain-v1.0.tar.gz -C /opt && rm /tmp/a30_toolchain-v1.0.tar.gz
 
@@ -20,7 +24,6 @@ ENV TARGET=arm-a30-linux-gnueabihf
 ENV SYSROOT=/opt/a30/arm-a30-linux-gnueabihf/sysroot
 ENV PATH=/opt/a30/bin:${PATH}
 
-# ---- compilers ----
 ENV CC=${TARGET}-gcc
 ENV CXX=${TARGET}-g++
 ENV AR=${TARGET}-ar
@@ -29,28 +32,35 @@ ENV LD=${TARGET}-ld
 ENV RANLIB=${TARGET}-ranlib
 ENV STRIP=${TARGET}-strip
 
-# ---- pkg-config FIX (CRITICAL) ----
+# ========================
+# PKG-CONFIG FIX
+# ========================
 ENV PKG_CONFIG=${TARGET}-pkg-config
 ENV PKG_CONFIG_PATH=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig
 ENV PKG_CONFIG_LIBDIR=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig
 ENV PKG_CONFIG_SYSROOT_DIR=$SYSROOT
 ENV PKG_CONFIG_DIR=
 
-# force correct pkg-config globally
 RUN ln -sf /opt/a30/bin/${TARGET}-pkg-config /usr/bin/pkg-config
 
-# ---- flags ----
+# ========================
+# FLAGS
+# ========================
 ENV CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2 -fPIC"
 ENV CXXFLAGS="$CFLAGS"
 ENV LDFLAGS="--sysroot=$SYSROOT"
 ENV LD_LIBRARY_PATH=$SYSROOT/usr/lib
 
-# ---- linker symlinks ----
+# ========================
+# SYSROOT FIXES
+# ========================
 RUN cd "$SYSROOT/lib" && \
     ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
     ln -sf libc-2.23.so libc.so.6
 
-# ---- meson cross ----
+# ========================
+# MESON CROSS
+# ========================
 RUN cat > /opt/a30/meson-cross.txt <<EOF
 [binaries]
 c = '${TARGET}-gcc'
@@ -68,17 +78,11 @@ endian = 'little'
 [properties]
 sys_root = '${SYSROOT}'
 needs_exe_wrapper = true
-
-[built-in options]
-c_args = ['--sysroot=${SYSROOT}', '-march=armv7-a']
-cpp_args = ['--sysroot=${SYSROOT}', '-march=armv7-a']
-c_link_args = ['--sysroot=${SYSROOT}']
-cpp_link_args = ['--sysroot=${SYSROOT}']
 EOF
 
-# =========================
+# ========================
 # LIBS
-# =========================
+# ========================
 
 # ---- libogg ----
 RUN cd /tmp && wget -q https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.gz && \
@@ -98,11 +102,32 @@ RUN cd /tmp && wget -q https://www.libsdl.org/release/SDL2-2.28.5.tar.gz && \
     ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
     make -j$(nproc) && make install
 
-# ---- libmad ----
-RUN cd /tmp && wget -q https://downloads.sourceforge.net/mad/libmad-0.15.1b.tar.gz && \
-    tar xzf libmad-0.15.1b.tar.gz && cd libmad-0.15.1b && \
-    ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
-    make -j$(nproc) && make install
+# ========================
+# 🔥 libmad FIXED
+# ========================
+RUN cd /tmp && \
+    wget -q https://downloads.sourceforge.net/mad/libmad-0.15.1b.tar.gz && \
+    tar xzf libmad-0.15.1b.tar.gz && \
+    cd libmad-0.15.1b && \
+    CFLAGS="$CFLAGS -DOPT_SPEED=0" \
+    ./configure \
+        --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared && \
+    \
+    find . -name Makefile -type f -exec sed -i \
+        -e 's/-fforce-mem//g' \
+        -e 's/-fforce-addr//g' \
+        -e 's/-fstrength-reduce//g' \
+        {} + && \
+    \
+    make -j$(nproc) && \
+    make install && \
+    cd "$SYSROOT/usr/lib" && \
+    [ -e libmad.so ] || ln -sf "$(basename "$(ls libmad.so.* | head -n1)")" libmad.so && \
+    rm -rf /tmp/libmad-0.15.1b*
 
 # ---- libtheora ----
 RUN cd /tmp && wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
@@ -116,7 +141,7 @@ RUN cd /tmp && wget -q https://github.com/libffi/libffi/releases/download/v3.4.6
     ./configure --host=${TARGET} --prefix=$SYSROOT/usr --disable-static --enable-shared && \
     make -j$(nproc) && make install
 
-# ---- glib (FIXED VERSION) ----
+# ---- glib (safe version) ----
 RUN cd /tmp && wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.tar.xz && \
     tar xf glib-2.56.4.tar.xz && cd glib-2.56.4 && \
     meson setup build --cross-file /opt/a30/meson-cross.txt \
@@ -126,39 +151,15 @@ RUN cd /tmp && wget -q https://download.gnome.org/sources/glib/2.56/glib-2.56.4.
     meson compile -C build && \
     meson install -C build
 
-# ---- libsndfile ----
-RUN cd /tmp && wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
-    tar xf libsndfile-1.2.2.tar.xz && cd libsndfile-1.2.2 && \
-    cmake -S . -B build \
-        -DCMAKE_SYSTEM_NAME=Linux \
-        -DCMAKE_SYSROOT=$SYSROOT \
-        -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
-        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-        -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr && \
-    cmake --build build -j$(nproc) && \
-    cmake --install build
-
-# ---- fluidsynth ----
-RUN cd /tmp && wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz && \
-    tar xzf v2.3.6.tar.gz && cd fluidsynth-2.3.6 && \
-    cmake -S . -B build \
-        -DCMAKE_SYSTEM_NAME=Linux \
-        -DCMAKE_SYSROOT=$SYSROOT \
-        -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
-        -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
-        -DBUILD_SHARED_LIBS=ON \
-        -Denable-pulseaudio=OFF \
-        -Denable-alsa=OFF && \
-    cmake --build build -j$(nproc) && \
-    cmake --install build
-
-# ---- runtime bundle ----
+# ========================
+# RUNTIME
+# ========================
 RUN mkdir -p /opt/a30-runtime/lib && \
     cp -av $SYSROOT/usr/lib/lib*.so* /opt/a30-runtime/lib/ || true
 
-# ---- build script ----
+# ========================
+# BUILD SCRIPT
+# ========================
 COPY build-a30.sh /build-a30.sh
 RUN chmod +x /build-a30.sh
 
