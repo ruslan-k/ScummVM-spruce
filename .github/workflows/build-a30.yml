@@ -80,12 +80,43 @@ jobs:
             -v ${{ github.workspace }}/ccache:/ccache \
             ${{ env.IMAGE }}:latest
 
-      - name: Upload binary and libs
+      - name: Upload Build scummvm.a30
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build scummvm.a30
+          path: |
+            output/scummvm
+            output/scummvm.a30
+            output/libfluidsynth.so.3*
+            output/libsndfile.so.1*
+            output/libglib-2.0.so.0*
+            output/libgthread-2.0.so.0*
+            output/libgobject-2.0.so.0*
+            output/libgio-2.0.so.0*
+            output/libgmodule-2.0.so.0*
+            output/libffi.so.8*
+            output/libtheoradec.so.1*
+            output/libSDL2_net-2.0.so.0*
+            output/fixjoy
+          if-no-files-found: warn
+
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mv output/scummvm output/scummvm.a30
-          gh release upload "latest" output/scummvm.a30 --clobber
-          gh release upload "latest" output/libtheoradec.so.1* --clobber
-          gh release upload "latest" output/libSDL2_net-2.0.so.0* --clobber
-          gh release upload "latest" output/fixjoy --clobber
+          if [ -f output/scummvm ]; then
+            mv output/scummvm output/scummvm.a30
+          fi
+
+          gh release upload "latest" output/scummvm.a30 --clobber || true
+          gh release upload "latest" output/libfluidsynth.so.3* --clobber || true
+          gh release upload "latest" output/libsndfile.so.1* --clobber || true
+          gh release upload "latest" output/libglib-2.0.so.0* --clobber || true
+          gh release upload "latest" output/libgthread-2.0.so.0* --clobber || true
+          gh release upload "latest" output/libgobject-2.0.so.0* --clobber || true
+          gh release upload "latest" output/libgio-2.0.so.0* --clobber || true
+          gh release upload "latest" output/libgmodule-2.0.so.0* --clobber || true
+          gh release upload "latest" output/libffi.so.8* --clobber || true
+          gh release upload "latest" output/libtheoradec.so.1* --clobber || true
+          gh release upload "latest" output/libSDL2_net-2.0.so.0* --clobber || true
+          gh release upload "latest" output/fixjoy --clobber || true
