@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       scummvm_version:
-        description: 'ScummVM version tag'
-        default: 'v2026.1.0'
+        description: "ScummVM version tag"
+        default: "v2026.1.0"
   workflow_call:
     inputs:
       scummvm_version:
         type: string
-        default: 'v2026.1.0'
+        default: "v2026.1.0"
 
 permissions:
   contents: write
@@ -22,6 +22,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +35,7 @@ jobs:
             gh release create "$TAG" \
               --target "${{ github.ref_name }}" \
               --title "Latest Build" \
-              --notes "ScummVM ${{ github.event.inputs.scummvm_version || 'v2026.1.0' }} binaries for spruce" \
+              --notes "ScummVM ${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }} binaries for spruce" \
             || true
 
       - name: Download A30 toolchain
@@ -66,53 +67,73 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ccache
-          key: ccache-a30-${{ github.event.inputs.scummvm_version || 'v2026.1.0' }}-${{ github.sha }}
+          key: ccache-a30-${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }}-${{ github.sha }}
           restore-keys: |
-            ccache-a30-${{ github.event.inputs.scummvm_version || 'v2026.1.0' }}-
+            ccache-a30-${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }}-
             ccache-a30-
 
       - name: Build ScummVM
         run: |
           mkdir -p output ccache
           docker run --rm \
-            -e SCUMMVM_VERSION=${{ github.event.inputs.scummvm_version || 'v2026.1.0' }} \
+            -e SCUMMVM_VERSION=${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }} \
             -v ${{ github.workspace }}/output:/output \
             -v ${{ github.workspace }}/ccache:/ccache \
             ${{ env.IMAGE }}:latest
 
-      - name: Prepare release bundle
+      - name: Normalize output name
         run: |
-          mkdir -p release/Build\ scummvm.a30
-
-          if [ -f output/scummvm ]; then
+          if [ -f output/scummvm ] && [ ! -f output/scummvm.a30 ]; then
             mv output/scummvm output/scummvm.a30
           fi
 
-          cp -av output/scummvm.a30 release/Build\ scummvm.a30/
-          cp -av output/libfluidsynth.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libsndfile.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libglib-2.0.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libgthread-2.0.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libgobject-2.0.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libgio-2.0.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libgmodule-2.0.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libffi.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libmad.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libtheoradec.so* release/Build\ scummvm.a30/ || true
-          cp -av output/libSDL2_net-2.0.so* release/Build\ scummvm.a30/ || true
-          cp -av output/fixjoy release/Build\ scummvm.a30/ || true
+      - name: Show output files
+        run: |
+          ls -lah output || true
 
-          cd release
-          tar -czf "Build scummvm.a30.tar.gz" "Build scummvm.a30"
-
-      - name: Upload artifact
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: Build scummvm.a30
-          path: release/Build scummvm.a30.tar.gz
+          path: output/*
+          if-no-files-found: warn
 
-      - name: Upload release bundle
+      - name: Upload release files
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "latest" "release/Build scummvm.a30.tar.gz" --clobber
+          for f in \
+            output/scummvm.a30 \
+            output/fixjoy \
+            output/libSDL2_net-2.0.so \
+            output/libSDL2_net-2.0.so.0 \
+            output/libSDL2_net-2.0.so.0.200.0 \
+            output/libtheoradec.so \
+            output/libtheoradec.so.1 \
+            output/libtheoradec.so.1.1.4 \
+            output/libfluidsynth.so \
+            output/libfluidsynth.so.3 \
+            output/libfluidsynth.so.3.2.4 \
+            output/libsndfile.so \
+            output/libsndfile.so.1 \
+            output/libsndfile.so.1.0.37 \
+            output/libglib-2.0.so \
+            output/libglib-2.0.so.0 \
+            output/libgthread-2.0.so \
+            output/libgthread-2.0.so.0 \
+            output/libgobject-2.0.so \
+            output/libgobject-2.0.so.0 \
+            output/libgio-2.0.so \
+            output/libgio-2.0.so.0 \
+            output/libgmodule-2.0.so \
+            output/libgmodule-2.0.so.0 \
+            output/libffi.so \
+            output/libffi.so.8 \
+            output/libmad.so \
+            output/libmad.so.0 \
+            output/libmad.so.0.2.1
+          do
+            if [ -e "$f" ]; then
+              gh release upload "latest" "$f" --clobber
+            fi
+          done
