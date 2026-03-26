@@ -58,7 +58,6 @@ ENV LD=/opt/a30/bin/arm-a30-linux-gnueabihf-ld
 ENV RANLIB=/opt/a30/bin/arm-a30-linux-gnueabihf-ranlib
 ENV STRIP=/opt/a30/bin/arm-a30-linux-gnueabihf-strip
 
-# Force sysroot through wrappers
 RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-gcc-13.2.0.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-gcc && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
@@ -231,28 +230,25 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/pcre-8.45*
 
-# ---- glib (FINAL FIX) ----
+# ---- glib (2.66.8 + BLFS patch) ----
 RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.66/glib-2.66.8.tar.xz && \
     wget -q https://ftp2.osuosl.org/pub/blfs/conglomeration/glib/glib-2.66.8-skip_warnings-1.patch && \
     tar xf glib-2.66.8.tar.xz && \
     cd glib-2.66.8 && \
     patch -Np1 -i /tmp/glib-2.66.8-skip_warnings-1.patch && \
-    \
     export PKG_CONFIG=${TARGET}-pkg-config && \
-    \
     meson setup build \
         --cross-file /opt/a30/meson-cross.txt \
         --prefix=$SYSROOT/usr \
         --libdir=lib \
         -Ddefault_library=shared \
         -Dinstalled_tests=false && \
-    \
     meson compile -C build -j$(nproc) && \
     meson install -C build && \
     rm -rf /tmp/glib-2.66.8* /tmp/glib-2.66.8-skip_warnings-1.patch
 
-# ---- libsndfile (FINAL FIX) ----
+# ---- libsndfile ----
 RUN cd /tmp && \
     wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
     tar xf libsndfile-1.2.2.tar.xz && \
@@ -278,17 +274,15 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- fluidsynth (NO libinstpatch) ----
+# ---- fluidsynth (no libinstpatch) ----
 RUN cd /tmp && \
     wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth-2.3.6.tar.gz && \
     tar xzf fluidsynth-2.3.6.tar.gz && \
     cd fluidsynth-2.3.6 && \
-    \
     export PKG_CONFIG=${TARGET}-pkg-config && \
     export PKG_CONFIG_PATH=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig && \
     export PKG_CONFIG_LIBDIR=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig && \
     export PKG_CONFIG_SYSROOT_DIR=$SYSROOT && \
-    \
     cmake -S . -B build \
         -DCMAKE_SYSTEM_NAME=Linux \
         -DCMAKE_C_COMPILER=${TARGET}-gcc \
@@ -298,51 +292,8 @@ RUN cd /tmp && \
         -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_SHARED_LIBS=ON \
-        \
         -Denable-libinstpatch=OFF \
-        -Denable-alsa=OFF \
-        -Denable-aufile=OFF \
-        -Denable-dbus=OFF \
-        -Denable-ipv6=OFF \
-        -Denable-jack=OFF \
-        -Denable-ladspa=OFF \
-        -Denable-midishare=OFF \
-        -Denable-network=OFF \
-        -Denable-oss=OFF \
-        -Denable-pipewire=OFF \
-        -Denable-pulseaudio=OFF \
-        -Denable-readline=OFF \
-        -Denable-sdl2=OFF \
-        -Denable-systemd=OFF \
-        -Denable-wasapi=OFF \
-        -Denable-dart=OFF \
-        -Denable-floats=ON && \
-    \
-    cmake --build build -j$(nproc) && \
-    cmake --install build && \
-    rm -rf /tmp/fluidsynth-2.3.6*
-
-# ---- fluidsynth ----
-RUN cd /tmp && \
-    wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth-2.3.6.tar.gz && \
-    tar xzf fluidsynth-2.3.6.tar.gz && \
-    cd fluidsynth-2.3.6 && \
-    export PKG_CONFIG=${TARGET}-pkg-config && \
-    export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" && \
-    export PKG_CONFIG_SYSROOT_DIR="$SYSROOT" && \
-    cmake -S . -B build \
-        -DCMAKE_SYSTEM_NAME=Linux \
-        -DCMAKE_C_COMPILER=${TARGET}-gcc \
-        -DCMAKE_CXX_COMPILER=${TARGET}-g++ \
-        -DCMAKE_SYSROOT=$SYSROOT \
-        -DCMAKE_FIND_ROOT_PATH=$SYSROOT \
-        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-        -DCMAKE_INSTALL_PREFIX=$SYSROOT/usr \
-        -DCMAKE_INSTALL_LIBDIR=lib \
-        -DBUILD_SHARED_LIBS=ON \
+        -Denable-libsndfile=ON \
         -Denable-alsa=OFF \
         -Denable-aufile=OFF \
         -Denable-dbus=OFF \
@@ -376,7 +327,6 @@ RUN cd "$SYSROOT/usr/lib" && \
     [ -e libgmodule-2.0.so ] || ln -sf "$(basename "$(ls libgmodule-2.0.so.* | head -n1)")" libgmodule-2.0.so && \
     [ -e libffi.so ] || ln -sf "$(basename "$(ls libffi.so.* | head -n1)")" libffi.so && \
     [ -e libsndfile.so ] || ln -sf "$(basename "$(ls libsndfile.so.* | head -n1)")" libsndfile.so && \
-    [ -e libinstpatch-1.0.so ] || ln -sf "$(basename "$(ls libinstpatch-1.0.so.* | head -n1)")" libinstpatch-1.0.so && \
     [ -e libfluidsynth.so ] || ln -sf "$(basename "$(ls libfluidsynth.so.* | head -n1)")" libfluidsynth.so && \
     true
 
@@ -399,7 +349,6 @@ RUN mkdir -p /opt/a30-runtime/lib && \
         "$SYSROOT/usr/lib/libgio-2.0.so"* \
         "$SYSROOT/usr/lib/libgmodule-2.0.so"* \
         "$SYSROOT/usr/lib/libsndfile.so"* \
-        "$SYSROOT/usr/lib/libinstpatch-1.0.so"* \
         "$SYSROOT/usr/lib/libfluidsynth.so"* \
         /opt/a30-runtime/lib/ && \
     true
