@@ -1,6 +1,9 @@
 name: Build scummvm.a30
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       scummvm_version:
@@ -18,6 +21,7 @@ permissions:
 
 env:
   IMAGE: ghcr.io/ruslan-k/scummvm-builder-a30
+  RELEASE_TAG: latest
 
 jobs:
   build:
@@ -26,17 +30,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure latest release exists
+      - name: Ensure release exists
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="latest"
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" \
+          if ! gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
               --target "${{ github.ref_name }}" \
               --title "Latest Build" \
-              --notes "ScummVM ${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }} binaries for spruce" \
-            || true
+              --notes "ScummVM ${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }} binaries for spruce"
+          fi
 
       - name: Download A30 toolchain
         run: |
@@ -86,9 +90,6 @@ jobs:
           if [ -f output/scummvm ] && [ ! -f output/scummvm.a30 ]; then
             mv output/scummvm output/scummvm.a30
           fi
-
-      - name: Show output files
-        run: |
           ls -lah output || true
 
       - name: Upload workflow artifact
@@ -134,6 +135,8 @@ jobs:
             output/libmad.so.0.2.1
           do
             if [ -e "$f" ]; then
-              gh release upload "latest" "$f" --clobber
+              gh release upload "$RELEASE_TAG" "$f" \
+                --repo "${{ github.repository }}" \
+                --clobber
             fi
           done
