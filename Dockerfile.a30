@@ -2,9 +2,6 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ========================
-# BASE
-# ========================
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     bash \
@@ -40,9 +37,6 @@ RUN apt-get update && \
     patch \
     && rm -rf /var/lib/apt/lists/*
 
-# ========================
-# TOOLCHAIN
-# ========================
 COPY a30_toolchain-v1.0.tar.gz /tmp/
 RUN tar xzf /tmp/a30_toolchain-v1.0.tar.gz -C /opt && rm /tmp/a30_toolchain-v1.0.tar.gz
 
@@ -63,9 +57,6 @@ RUN rm -f /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++ && \
     printf '#!/bin/sh\nexec /opt/a30/bin/%s-c++.br_real --sysroot=%s "$@"\n' "$TARGET" "$SYSROOT" > /opt/a30/bin/${TARGET}-g++ && \
     chmod +x /opt/a30/bin/${TARGET}-gcc /opt/a30/bin/${TARGET}-g++
 
-# ========================
-# PKG-CONFIG
-# ========================
 ENV PKG_CONFIG=/opt/a30/bin/arm-a30-linux-gnueabihf-pkg-config
 ENV PKG_CONFIG_PATH=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib/pkgconfig:/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/share/pkgconfig
 ENV PKG_CONFIG_LIBDIR=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib/pkgconfig:/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/share/pkgconfig
@@ -80,17 +71,11 @@ RUN printf '#!/bin/sh\nexport PKG_CONFIG_SYSROOT_DIR=%s\nexport PKG_CONFIG_LIBDI
 RUN printf '#!/bin/sh\nexec /opt/a30/bin/%s-pkg-config "$@"\n' "$TARGET" > /usr/local/bin/pkg-config && \
     chmod +x /usr/local/bin/pkg-config
 
-# ========================
-# FLAGS
-# ========================
 ENV CFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot\ -march=armv7-a\ -mfpu=neon-vfpv4\ -mfloat-abi=hard\ -O2\ -fPIC
 ENV CXXFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot\ -march=armv7-a\ -mfpu=neon-vfpv4\ -mfloat-abi=hard\ -O2\ -fPIC
 ENV LDFLAGS=--sysroot=/opt/a30/arm-a30-linux-gnueabihf/sysroot
 ENV LD_LIBRARY_PATH=/opt/a30/arm-a30-linux-gnueabihf/sysroot/usr/lib
 
-# ========================
-# SYSROOT SONAME LINKS
-# ========================
 RUN cd "$SYSROOT/lib" && \
     ln -sf ld-2.23.so ld-linux-armhf.so.3 && \
     ln -sf libc-2.23.so libc.so.6 && \
@@ -101,9 +86,6 @@ RUN cd "$SYSROOT/lib" && \
     ln -sf libresolv-2.23.so libresolv.so.2 && \
     ln -sf libnsl-2.23.so libnsl.so.1
 
-# ========================
-# MESON CROSS FILE
-# ========================
 RUN cat > /opt/a30/meson-cross.txt <<EOF
 [binaries]
 c = '${TARGET}-gcc'
@@ -129,11 +111,6 @@ c_link_args = ['--sysroot=${SYSROOT}']
 cpp_link_args = ['--sysroot=${SYSROOT}']
 EOF
 
-# ========================
-# LIBS
-# ========================
-
-# ---- libogg ----
 RUN cd /tmp && \
     wget -q https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.gz && \
     tar xzf libogg-1.3.5.tar.gz && \
@@ -148,7 +125,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/libogg-1.3.5*
 
-# ---- libvorbis ----
 RUN cd /tmp && \
     wget -q https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz && \
     tar xzf libvorbis-1.3.7.tar.gz && \
@@ -163,7 +139,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/libvorbis-1.3.7*
 
-# ---- SDL2 ----
 RUN cd /tmp && \
     wget -q https://www.libsdl.org/release/SDL2-2.28.5.tar.gz && \
     tar xzf SDL2-2.28.5.tar.gz && \
@@ -181,7 +156,28 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/SDL2-2.28.5*
 
-# ---- libtheora ----
+RUN cd /tmp && \
+    wget -q https://downloads.sourceforge.net/mad/libmad-0.15.1b.tar.gz && \
+    tar xzf libmad-0.15.1b.tar.gz && \
+    cd libmad-0.15.1b && \
+    CFLAGS="$CFLAGS -DOPT_SPEED=0" \
+    ./configure \
+        --host=${TARGET} \
+        --build=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE) \
+        --prefix=$SYSROOT/usr \
+        --disable-static \
+        --enable-shared && \
+    find . -name Makefile -type f -exec sed -i \
+        -e 's/-fforce-mem//g' \
+        -e 's/-fforce-addr//g' \
+        -e 's/-fstrength-reduce//g' \
+        {} + && \
+    make -j$(nproc) && \
+    make install && \
+    cd "$SYSROOT/usr/lib" && \
+    [ -e libmad.so ] || ln -sf "$(basename "$(ls libmad.so.* | head -n1)")" libmad.so && \
+    rm -rf /tmp/libmad-0.15.1b*
+
 RUN cd /tmp && \
     wget -q https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.bz2 && \
     tar xjf libtheora-1.1.1.tar.bz2 && \
@@ -199,7 +195,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/libtheora-1.1.1*
 
-# ---- libffi ----
 RUN cd /tmp && \
     wget -q https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz && \
     tar xzf libffi-3.4.6.tar.gz && \
@@ -214,7 +209,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/libffi-3.4.6*
 
-# ---- pcre ----
 RUN cd /tmp && \
     wget -q https://sourceforge.net/projects/pcre/files/pcre/8.45/pcre-8.45.tar.gz && \
     tar xzf pcre-8.45.tar.gz && \
@@ -230,7 +224,6 @@ RUN cd /tmp && \
     make install && \
     rm -rf /tmp/pcre-8.45*
 
-# ---- glib (2.66.8 + BLFS patch) ----
 RUN cd /tmp && \
     wget -q https://download.gnome.org/sources/glib/2.66/glib-2.66.8.tar.xz && \
     wget -q https://ftp2.osuosl.org/pub/blfs/conglomeration/glib/glib-2.66.8-skip_warnings-1.patch && \
@@ -248,7 +241,6 @@ RUN cd /tmp && \
     meson install -C build && \
     rm -rf /tmp/glib-2.66.8* /tmp/glib-2.66.8-skip_warnings-1.patch
 
-# ---- libsndfile ----
 RUN cd /tmp && \
     wget -q https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz && \
     tar xf libsndfile-1.2.2.tar.xz && \
@@ -274,7 +266,6 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/libsndfile-1.2.2*
 
-# ---- fluidsynth (no libinstpatch) ----
 RUN cd /tmp && \
     wget -q https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.3.6.tar.gz -O fluidsynth-2.3.6.tar.gz && \
     tar xzf fluidsynth-2.3.6.tar.gz && \
@@ -315,9 +306,6 @@ RUN cd /tmp && \
     cmake --install build && \
     rm -rf /tmp/fluidsynth-2.3.6*
 
-# ========================
-# COMMON SONAME LINKS
-# ========================
 RUN cd "$SYSROOT/usr/lib" && \
     [ -e libSDL2.so ] || ln -sf "$(basename "$(ls libSDL2-2.0.so.* | head -n1)")" libSDL2.so && \
     [ -e libglib-2.0.so ] || ln -sf "$(basename "$(ls libglib-2.0.so.* | head -n1)")" libglib-2.0.so && \
@@ -326,13 +314,11 @@ RUN cd "$SYSROOT/usr/lib" && \
     [ -e libgio-2.0.so ] || ln -sf "$(basename "$(ls libgio-2.0.so.* | head -n1)")" libgio-2.0.so && \
     [ -e libgmodule-2.0.so ] || ln -sf "$(basename "$(ls libgmodule-2.0.so.* | head -n1)")" libgmodule-2.0.so && \
     [ -e libffi.so ] || ln -sf "$(basename "$(ls libffi.so.* | head -n1)")" libffi.so && \
+    [ -e libmad.so ] || ln -sf "$(basename "$(ls libmad.so.* | head -n1)")" libmad.so && \
     [ -e libsndfile.so ] || ln -sf "$(basename "$(ls libsndfile.so.* | head -n1)")" libsndfile.so && \
     [ -e libfluidsynth.so ] || ln -sf "$(basename "$(ls libfluidsynth.so.* | head -n1)")" libfluidsynth.so && \
     true
 
-# ========================
-# RUNTIME BUNDLE
-# ========================
 RUN mkdir -p /opt/a30-runtime/lib && \
     cp -av \
         "$SYSROOT/usr/lib/libogg.so"* \
@@ -343,6 +329,7 @@ RUN mkdir -p /opt/a30-runtime/lib && \
         "$SYSROOT/usr/lib/libtheoradec.so"* \
         "$SYSROOT/usr/lib/libSDL2.so"* \
         "$SYSROOT/usr/lib/libffi.so"* \
+        "$SYSROOT/usr/lib/libmad.so"* \
         "$SYSROOT/usr/lib/libglib-2.0.so"* \
         "$SYSROOT/usr/lib/libgthread-2.0.so"* \
         "$SYSROOT/usr/lib/libgobject-2.0.so"* \
@@ -355,9 +342,6 @@ RUN mkdir -p /opt/a30-runtime/lib && \
 
 RUN (cd /opt/a30-runtime/lib && ls -1 > /opt/a30-runtime/RUNTIME_LIBS.txt)
 
-# ========================
-# BUILD SCRIPT
-# ========================
 COPY build-a30.sh /build-a30.sh
 RUN chmod +x /build-a30.sh
 COPY patches/ /patches/
