@@ -19,48 +19,30 @@ on:
 
 permissions:
   contents: write
-  packages: write
-
-concurrency:
-  group: build-a30-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/scummvm-builder-a30
   RELEASE_TAG: latest
-  DEFAULT_SCUMMVM_VERSION: v2026.1.0
   TOOLCHAIN_URL: https://github.com/steward-fu/website/releases/download/miyoo-a30/a30_toolchain-v1.0.tar.gz
   TOOLCHAIN_ARCHIVE: a30_toolchain-v1.0.tar.gz
+  TOOLCHAIN_ROOT: /opt/a30
+  TARGET: arm-a30-linux-gnueabihf
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     env:
       SCUMMVM_VERSION: ${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Prepare variables
-        id: vars
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "image_ref=${IMAGE_NAME}:latest" >> "$GITHUB_OUTPUT"
-          echo "cache_ref=${IMAGE_NAME}:buildcache" >> "$GITHUB_OUTPUT"
-
-          echo "SCUMMVM_VERSION=${SCUMMVM_VERSION}"
-          echo "IMAGE_REF=${IMAGE_NAME}:latest"
-
-      - name: Ensure release exists
+      - name: Ensure latest release exists
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
           if ! gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
@@ -70,126 +52,218 @@ jobs:
               --notes "ScummVM ${SCUMMVM_VERSION} binaries for spruce"
           fi
 
-      - name: Restore cached A30 toolchain archive
+      - name: Install host build dependencies
+        run: |
+          set -euxo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bash \
+            build-essential \
+            pkg-config \
+            git \
+            ca-certificates \
+            python3 \
+            python3-pip \
+            wget \
+            curl \
+            ccache \
+            autoconf \
+            automake \
+            libtool \
+            make \
+            perl \
+            xz-utils \
+            bzip2 \
+            file \
+            sed \
+            gawk \
+            meson \
+            ninja-build \
+            cmake \
+            gettext \
+            gettext-base \
+            autopoint \
+            texinfo \
+            dpkg-dev \
+            unzip \
+            rsync \
+            patch
+
+      - name: Prepare cache dirs
+        run: |
+          set -euxo pipefail
+          mkdir -p "${{ github.workspace }}/.cache/toolchain"
+          mkdir -p "${{ github.workspace }}/.ccache"
+          mkdir -p "${{ github.workspace }}/output"
+          mkdir -p "${{ github.workspace }}/.src-cache"
+
+      - name: Cache extracted A30 toolchain
         id: cache-toolchain
         uses: actions/cache@v4
         with:
-          path: ${{ env.TOOLCHAIN_ARCHIVE }}
-          key: a30-toolchain-v1-${{ env.TOOLCHAIN_URL }}
+          path: ${{ github.workspace }}/.cache/toolchain/a30
+          key: a30-toolchain-v1.0
 
-      - name: Download A30 toolchain archive
+      - name: Download and extract A30 toolchain
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        shell: bash
         run: |
-          set -euo pipefail
-          curl -L --fail --retry 5 --retry-delay 3 \
-            "${TOOLCHAIN_URL}" \
-            -o "${TOOLCHAIN_ARCHIVE}"
-          ls -lh "${TOOLCHAIN_ARCHIVE}"
+          set -euxo pipefail
 
-      - name: Verify A30 toolchain archive exists
-        shell: bash
+          curl -L "$TOOLCHAIN_URL" -o "${{ github.workspace }}/${TOOLCHAIN_ARCHIVE}"
+          rm -rf "${{ github.workspace }}/.cache/toolchain/a30"
+          mkdir -p "${{ github.workspace }}/.cache/toolchain/a30"
+          tar xzf "${{ github.workspace }}/${TOOLCHAIN_ARCHIVE}" -C "${{ github.workspace }}/.cache/toolchain/a30"
+
+      - name: Install A30 toolchain into /opt
         run: |
-          set -euo pipefail
-          test -s "${TOOLCHAIN_ARCHIVE}"
-          ls -lh "${TOOLCHAIN_ARCHIVE}"
+          set -euxo pipefail
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+          sudo rm -rf "$TOOLCHAIN_ROOT"
+          sudo mkdir -p /opt
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          if [ -d "${{ github.workspace }}/.cache/toolchain/a30/a30" ]; then
+            sudo cp -a "${{ github.workspace }}/.cache/toolchain/a30/a30" "$TOOLCHAIN_ROOT"
+          else
+            # Fallback if tarball layout changes
+            sudo cp -a "${{ github.workspace }}/.cache/toolchain/a30" "$TOOLCHAIN_ROOT"
+          fi
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+          sudo chown -R "$USER":"$USER" "$TOOLCHAIN_ROOT"
+
+      - name: Recreate compiler wrappers and sysroot links
+        run: |
+          set -euxo pipefail
+
+          export SYSROOT="$TOOLCHAIN_ROOT/${TARGET}/sysroot"
+
+          rm -f "$TOOLCHAIN_ROOT/bin/${TARGET}-gcc" "$TOOLCHAIN_ROOT/bin/${TARGET}-g++"
+
+          cat > "$TOOLCHAIN_ROOT/bin/${TARGET}-gcc" <<EOF
+          #!/bin/sh
+          exec $TOOLCHAIN_ROOT/bin/${TARGET}-gcc-13.2.0.br_real --sysroot=$SYSROOT "\$@"
+          EOF
+
+          cat > "$TOOLCHAIN_ROOT/bin/${TARGET}-g++" <<EOF
+          #!/bin/sh
+          exec $TOOLCHAIN_ROOT/bin/${TARGET}-c++.br_real --sysroot=$SYSROOT "\$@"
+          EOF
+
+          chmod +x "$TOOLCHAIN_ROOT/bin/${TARGET}-gcc" "$TOOLCHAIN_ROOT/bin/${TARGET}-g++"
+
+          cat > "$TOOLCHAIN_ROOT/bin/${TARGET}-pkg-config" <<EOF
+          #!/bin/sh
+          export PKG_CONFIG_SYSROOT_DIR=$SYSROOT
+          export PKG_CONFIG_LIBDIR=$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig
+          exec /usr/bin/pkg-config "\$@"
+          EOF
+
+          chmod +x "$TOOLCHAIN_ROOT/bin/${TARGET}-pkg-config"
+
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$TOOLCHAIN_ROOT/bin/${TARGET}-pkg-config" "$HOME/.local/bin/${TARGET}-pkg-config"
+
+          cd "$SYSROOT/lib"
+          ln -sf ld-2.23.so ld-linux-armhf.so.3
+          ln -sf libc-2.23.so libc.so.6
+          ln -sf libpthread-2.23.so libpthread.so.0
+          ln -sf libdl-2.23.so libdl.so.2
+          ln -sf libm-2.23.so libm.so.6
+          ln -sf librt-2.23.so librt.so.1
+          ln -sf libresolv-2.23.so libresolv.so.2
+          ln -sf libnsl-2.23.so libnsl.so.1
+
+      - name: Cache ScummVM source tree
+        id: cache-scummvm-src
+        uses: actions/cache@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          path: ${{ github.workspace }}/.src-cache/scummvm-${{ env.SCUMMVM_VERSION }}
+          key: scummvm-src-${{ env.SCUMMVM_VERSION }}
+
+      - name: Populate cached ScummVM source tree
+        if: steps.cache-scummvm-src.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+
+          rm -rf "${{ github.workspace }}/.src-cache/scummvm-${SCUMMVM_VERSION}"
+          git clone --depth 1 --branch "$SCUMMVM_VERSION" https://github.com/scummvm/scummvm.git \
+            "${{ github.workspace }}/.src-cache/scummvm-${SCUMMVM_VERSION}"
 
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: ccache
-          key: >
-            ccache-a30-${{ runner.os }}-${{ env.SCUMMVM_VERSION }}-${{
-            hashFiles('Dockerfile.a30', 'build-a30.sh', 'patches/**', '.github/workflows/build-a30.yml') }}
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-a30-${{ env.SCUMMVM_VERSION }}-${{ runner.os }}-${{ hashFiles('build-a30.sh', 'patches/**/*.patch', '.github/workflows/build-a30.yml') }}
           restore-keys: |
-            ccache-a30-${{ runner.os }}-${{ env.SCUMMVM_VERSION }}-
-            ccache-a30-${{ runner.os }}-
+            ccache-a30-${{ env.SCUMMVM_VERSION }}-${{ runner.os }}-
+            ccache-a30-${{ env.SCUMMVM_VERSION }}-
+            ccache-a30-
 
-      - name: Prepare output directories
-        shell: bash
+      - name: Prepare build workspace
         run: |
-          set -euo pipefail
-          mkdir -p output ccache
+          set -euxo pipefail
 
-      - name: Build builder image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.a30
-          load: true
-          push: false
-          tags: ${{ steps.vars.outputs.image_ref }}
-          cache-from: |
-            type=gha,scope=scummvm-a30-image
-            type=registry,ref=${{ steps.vars.outputs.cache_ref }}
-          cache-to: |
-            type=gha,mode=max,scope=scummvm-a30-image
-            type=registry,ref=${{ steps.vars.outputs.cache_ref }},mode=max
+          rm -rf "${{ github.workspace }}/scummvm"
+          cp -a "${{ github.workspace }}/.src-cache/scummvm-${SCUMMVM_VERSION}" "${{ github.workspace }}/scummvm"
 
-      - name: Build ScummVM
-        shell: bash
+          rm -rf /ccache /output || true
+          ln -s "${{ github.workspace }}/.ccache" /ccache
+          ln -s "${{ github.workspace }}/output" /output
+
+      - name: Build ScummVM for A30
+        env:
+          CCACHE_DIR: /ccache
+          OUTPUT_DIR: /output
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
-          docker run --rm \
-            -e SCUMMVM_VERSION="${SCUMMVM_VERSION}" \
-            -e CCACHE_DIR=/ccache \
-            -e CCACHE_BASEDIR=/build \
-            -e CCACHE_COMPRESS=1 \
-            -e CCACHE_MAXSIZE=1G \
-            -v "${{ github.workspace }}/output:/output" \
-            -v "${{ github.workspace }}/ccache:/ccache" \
-            "${{ steps.vars.outputs.image_ref }}"
+          export PATH="$TOOLCHAIN_ROOT/bin:$HOME/.local/bin:$PATH"
+          export SYSROOT="$TOOLCHAIN_ROOT/${TARGET}/sysroot"
 
-      - name: Normalize output name
-        shell: bash
+          export CC="ccache ${TARGET}-gcc"
+          export CXX="ccache ${TARGET}-g++"
+          export AR="${TARGET}-ar"
+          export AS="${TARGET}-as"
+          export LD="${TARGET}-ld"
+          export RANLIB="${TARGET}-ranlib"
+          export STRIP="${TARGET}-strip"
+          export PKG_CONFIG="${TARGET}-pkg-config"
+
+          export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig"
+          export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig"
+          export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+
+          export CFLAGS="--sysroot=$SYSROOT -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -O2"
+          export CXXFLAGS="$CFLAGS"
+          export LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++"
+
+          ccache --zero-stats || true
+          ./build-a30.sh
+          ccache --show-stats || true
+
+      - name: Verify output
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
           if [ -f output/scummvm ] && [ ! -f output/scummvm.a30 ]; then
             mv output/scummvm output/scummvm.a30
           fi
 
-          ls -lah output || true
-
-      - name: Show ccache stats
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          docker run --rm \
-            -e CCACHE_DIR=/ccache \
-            -v "${{ github.workspace }}/ccache:/ccache" \
-            "${{ steps.vars.outputs.image_ref }}" \
-            /bin/bash -lc 'command -v ccache >/dev/null 2>&1 && ccache -s || true'
+          test -f output/scummvm.a30
+          ls -lah output
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Build-scummvm-a30
+          name: Build scummvm.a30
           path: output/*
-          if-no-files-found: warn
-          retention-days: 14
+          if-no-files-found: error
 
       - name: Upload release files
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
           files=(
             output/scummvm.a30
@@ -223,18 +297,10 @@ jobs:
             output/libmad.so.0.2.1
           )
 
-          existing=()
           for f in "${files[@]}"; do
             if [ -e "$f" ]; then
-              existing+=("$f")
+              gh release upload "$RELEASE_TAG" "$f" \
+                --repo "${{ github.repository }}" \
+                --clobber
             fi
           done
-
-          if [ "${#existing[@]}" -gt 0 ]; then
-            gh release upload "$RELEASE_TAG" \
-              --repo "${{ github.repository }}" \
-              --clobber \
-              "${existing[@]}"
-          else
-            echo "No release files found to upload."
-          fi
