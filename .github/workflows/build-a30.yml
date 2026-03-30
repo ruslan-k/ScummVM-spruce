@@ -241,9 +241,10 @@ jobs:
           export LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++"
 
           ccache --zero-stats || true
+          chmod +x ./build-a30.sh
           ./build-a30.sh
           ccache --show-stats || true
-
+          
       - name: Verify output
         run: |
           set -euxo pipefail
