@@ -215,8 +215,8 @@ jobs:
           
       - name: Build ScummVM for A30
         env:
-          CCACHE_DIR: /ccache
-          OUTPUT_DIR: /output
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          OUTPUT_DIR: ${{ github.workspace }}/output
         run: |
           set -euxo pipefail
 
