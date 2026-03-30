@@ -206,10 +206,13 @@ jobs:
           rm -rf "${{ github.workspace }}/scummvm"
           cp -a "${{ github.workspace }}/.src-cache/scummvm-${SCUMMVM_VERSION}" "${{ github.workspace }}/scummvm"
 
-          rm -rf /ccache /output || true
-          ln -s "${{ github.workspace }}/.ccache" /ccache
-          ln -s "${{ github.workspace }}/output" /output
+          mkdir -p "${{ github.workspace }}/.ccache"
+          mkdir -p "${{ github.workspace }}/output"
 
+          sudo rm -rf /ccache /output || true
+          sudo ln -s "${{ github.workspace }}/.ccache" /ccache
+          sudo ln -s "${{ github.workspace }}/output" /output
+          
       - name: Build ScummVM for A30
         env:
           CCACHE_DIR: /ccache
