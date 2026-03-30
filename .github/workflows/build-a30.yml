@@ -9,6 +9,8 @@ on:
       scummvm_version:
         description: "ScummVM version tag"
         default: "v2026.1.0"
+        required: false
+        type: string
   workflow_call:
     inputs:
       scummvm_version:
@@ -19,33 +21,81 @@ permissions:
   contents: write
   packages: write
 
+concurrency:
+  group: build-a30-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  IMAGE: ghcr.io/ruslan-k/scummvm-builder-a30
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/scummvm-builder-a30
   RELEASE_TAG: latest
+  DEFAULT_SCUMMVM_VERSION: v2026.1.0
+  TOOLCHAIN_URL: https://github.com/steward-fu/website/releases/download/miyoo-a30/a30_toolchain-v1.0.tar.gz
+  TOOLCHAIN_ARCHIVE: a30_toolchain-v1.0.tar.gz
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
+    env:
+      SCUMMVM_VERSION: ${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Prepare variables
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "image_ref=${IMAGE_NAME}:latest" >> "$GITHUB_OUTPUT"
+          echo "cache_ref=${IMAGE_NAME}:buildcache" >> "$GITHUB_OUTPUT"
+
+          echo "SCUMMVM_VERSION=${SCUMMVM_VERSION}"
+          echo "IMAGE_REF=${IMAGE_NAME}:latest"
 
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           if ! gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
               --repo "${{ github.repository }}" \
               --target "${{ github.ref_name }}" \
               --title "Latest Build" \
-              --notes "ScummVM ${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }} binaries for spruce"
+              --notes "ScummVM ${SCUMMVM_VERSION} binaries for spruce"
           fi
 
-      - name: Download A30 toolchain
+      - name: Restore cached A30 toolchain archive
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TOOLCHAIN_ARCHIVE }}
+          key: a30-toolchain-v1-${{ env.TOOLCHAIN_URL }}
+
+      - name: Download A30 toolchain archive
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        shell: bash
         run: |
-          wget -q -O a30_toolchain-v1.0.tar.gz \
-            "https://github.com/steward-fu/website/releases/download/miyoo-a30/a30_toolchain-v1.0.tar.gz"
+          set -euo pipefail
+          curl -L --fail --retry 5 --retry-delay 3 \
+            "${TOOLCHAIN_URL}" \
+            -o "${TOOLCHAIN_ARCHIVE}"
+          ls -lh "${TOOLCHAIN_ARCHIVE}"
+
+      - name: Verify A30 toolchain archive exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "${TOOLCHAIN_ARCHIVE}"
+          ls -lh "${TOOLCHAIN_ARCHIVE}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -57,86 +107,134 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.a30
-          push: true
-          tags: ${{ env.IMAGE }}:latest
-          cache-from: type=registry,ref=${{ env.IMAGE }}:cache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:cache,mode=max
-
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: ccache
-          key: ccache-a30-${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }}-${{ github.sha }}
+          key: >
+            ccache-a30-${{ runner.os }}-${{ env.SCUMMVM_VERSION }}-${{
+            hashFiles('Dockerfile.a30', 'build-a30.sh', 'patches/**', '.github/workflows/build-a30.yml') }}
           restore-keys: |
-            ccache-a30-${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }}-
-            ccache-a30-
+            ccache-a30-${{ runner.os }}-${{ env.SCUMMVM_VERSION }}-
+            ccache-a30-${{ runner.os }}-
+
+      - name: Prepare output directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output ccache
+
+      - name: Build builder image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.a30
+          load: true
+          push: false
+          tags: ${{ steps.vars.outputs.image_ref }}
+          cache-from: |
+            type=gha,scope=scummvm-a30-image
+            type=registry,ref=${{ steps.vars.outputs.cache_ref }}
+          cache-to: |
+            type=gha,mode=max,scope=scummvm-a30-image
+            type=registry,ref=${{ steps.vars.outputs.cache_ref }},mode=max
 
       - name: Build ScummVM
+        shell: bash
         run: |
-          mkdir -p output ccache
+          set -euo pipefail
+
           docker run --rm \
-            -e SCUMMVM_VERSION=${{ github.event.inputs.scummvm_version || inputs.scummvm_version || 'v2026.1.0' }} \
-            -v ${{ github.workspace }}/output:/output \
-            -v ${{ github.workspace }}/ccache:/ccache \
-            ${{ env.IMAGE }}:latest
+            -e SCUMMVM_VERSION="${SCUMMVM_VERSION}" \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_BASEDIR=/build \
+            -e CCACHE_COMPRESS=1 \
+            -e CCACHE_MAXSIZE=1G \
+            -v "${{ github.workspace }}/output:/output" \
+            -v "${{ github.workspace }}/ccache:/ccache" \
+            "${{ steps.vars.outputs.image_ref }}"
 
       - name: Normalize output name
+        shell: bash
         run: |
+          set -euo pipefail
+
           if [ -f output/scummvm ] && [ ! -f output/scummvm.a30 ]; then
             mv output/scummvm output/scummvm.a30
           fi
+
           ls -lah output || true
+
+      - name: Show ccache stats
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker run --rm \
+            -e CCACHE_DIR=/ccache \
+            -v "${{ github.workspace }}/ccache:/ccache" \
+            "${{ steps.vars.outputs.image_ref }}" \
+            /bin/bash -lc 'command -v ccache >/dev/null 2>&1 && ccache -s || true'
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Build scummvm.a30
+          name: Build-scummvm-a30
           path: output/*
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload release files
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          for f in \
-            output/scummvm.a30 \
-            output/fixjoy \
-            output/libSDL2_net-2.0.so \
-            output/libSDL2_net-2.0.so.0 \
-            output/libSDL2_net-2.0.so.0.200.0 \
-            output/libtheoradec.so \
-            output/libtheoradec.so.1 \
-            output/libtheoradec.so.1.1.4 \
-            output/libfluidsynth.so \
-            output/libfluidsynth.so.3 \
-            output/libfluidsynth.so.3.2.4 \
-            output/libsndfile.so \
-            output/libsndfile.so.1 \
-            output/libsndfile.so.1.0.37 \
-            output/libglib-2.0.so \
-            output/libglib-2.0.so.0 \
-            output/libgthread-2.0.so \
-            output/libgthread-2.0.so.0 \
-            output/libgobject-2.0.so \
-            output/libgobject-2.0.so.0 \
-            output/libgio-2.0.so \
-            output/libgio-2.0.so.0 \
-            output/libgmodule-2.0.so \
-            output/libgmodule-2.0.so.0 \
-            output/libffi.so \
-            output/libffi.so.8 \
-            output/libmad.so \
-            output/libmad.so.0 \
+          set -euo pipefail
+
+          files=(
+            output/scummvm.a30
+            output/fixjoy
+            output/libSDL2_net-2.0.so
+            output/libSDL2_net-2.0.so.0
+            output/libSDL2_net-2.0.so.0.200.0
+            output/libtheoradec.so
+            output/libtheoradec.so.1
+            output/libtheoradec.so.1.1.4
+            output/libfluidsynth.so
+            output/libfluidsynth.so.3
+            output/libfluidsynth.so.3.2.4
+            output/libsndfile.so
+            output/libsndfile.so.1
+            output/libsndfile.so.1.0.37
+            output/libglib-2.0.so
+            output/libglib-2.0.so.0
+            output/libgthread-2.0.so
+            output/libgthread-2.0.so.0
+            output/libgobject-2.0.so
+            output/libgobject-2.0.so.0
+            output/libgio-2.0.so
+            output/libgio-2.0.so.0
+            output/libgmodule-2.0.so
+            output/libgmodule-2.0.so.0
+            output/libffi.so
+            output/libffi.so.8
+            output/libmad.so
+            output/libmad.so.0
             output/libmad.so.0.2.1
-          do
+          )
+
+          existing=()
+          for f in "${files[@]}"; do
             if [ -e "$f" ]; then
-              gh release upload "$RELEASE_TAG" "$f" \
-                --repo "${{ github.repository }}" \
-                --clobber
+              existing+=("$f")
             fi
           done
+
+          if [ "${#existing[@]}" -gt 0 ]; then
+            gh release upload "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --clobber \
+              "${existing[@]}"
+          else
+            echo "No release files found to upload."
+          fi
