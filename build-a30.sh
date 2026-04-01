@@ -149,7 +149,6 @@ rm -f "$SYSROOT/usr/lib/libfontconfig"* "$SYSROOT/usr/lib/pkgconfig/fontconfig.p
   --with-mad-prefix="$SYSROOT/usr" \
   --with-theoradec-prefix="$SYSROOT/usr" \
   --disable-alsa \
-  --disable-seq \
   --disable-sndio \
   --disable-mt32emu
   
