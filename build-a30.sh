@@ -144,10 +144,15 @@ rm -f "$SYSROOT/usr/lib/libfontconfig"* "$SYSROOT/usr/lib/pkgconfig/fontconfig.p
   --disable-debug \
   --disable-eventrecorder \
   --with-sdl-prefix="$SYSROOT/usr" \
+  --enable-fluidsynth \
   --with-fluidsynth-prefix="$SYSROOT/usr" \
   --with-mad-prefix="$SYSROOT/usr" \
-  --with-theoradec-prefix="$SYSROOT/usr"
-
+  --with-theoradec-prefix="$SYSROOT/usr" \
+  --disable-alsa \
+  --disable-seq \
+  --disable-sndio \
+  --disable-mt32emu
+  
 make -j"$(nproc)"
 
 mkdir -p "$OUTPUT_DIR"
@@ -165,7 +170,6 @@ cp -av "$SYSROOT/usr/lib/libgobject-2.0.so"* "$OUTPUT_DIR/" || true
 cp -av "$SYSROOT/usr/lib/libgio-2.0.so"* "$OUTPUT_DIR/" || true
 cp -av "$SYSROOT/usr/lib/libgmodule-2.0.so"* "$OUTPUT_DIR/" || true
 cp -av "$SYSROOT/usr/lib/libffi.so"* "$OUTPUT_DIR/" || true
-cp -av "$SYSROOT/usr/lib/libmad.so"* "$OUTPUT_DIR/" || true
 
 cat > /tmp/fixjoy.c <<'FIXJOY'
 #include <stdio.h>
