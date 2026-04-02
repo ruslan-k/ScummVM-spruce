@@ -136,6 +136,11 @@ export LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++"
 
 rm -f "$SYSROOT/usr/lib/libfontconfig"* "$SYSROOT/usr/lib/pkgconfig/fontconfig.pc"
 
+echo "=== Checking FluidSynth in sysroot ==="
+find "$SYSROOT/usr/include" -maxdepth 3 \( -name 'fluidsynth.h' -o -path '*/fluidsynth/fluidsynth.h' \) -print || true
+find "$SYSROOT/usr/lib/pkgconfig" -maxdepth 1 -name 'fluidsynth.pc' -print || true
+find "$SYSROOT/usr/lib" -maxdepth 2 -name 'libfluidsynth.so*' -print || true
+
 ./configure \
   --host=arm-linux-gnueabihf \
   --backend=sdl \
